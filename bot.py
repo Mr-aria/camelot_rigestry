@@ -1620,7 +1620,6 @@ def main():
             WAITING_RULES_ACCEPT: [CallbackQueryHandler(rules_callback, pattern='^(rules_accept|rules_cancel)$')],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(reg_conv)
     
@@ -1631,7 +1630,6 @@ def main():
             RESTORE_BACKUP_STATE: [MessageHandler(filters.Document.ALL, restore_backup_file)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(restore_conv)
     
@@ -1643,7 +1641,6 @@ def main():
             BANK_PASSWORD_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bank_password_receive)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(bank_conv)
     
@@ -1654,7 +1651,6 @@ def main():
             ADMIN_USER_MANAGE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_manage_user_receive)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(manage_conv)
     
@@ -1671,7 +1667,6 @@ def main():
             ADMIN_EDIT_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_value)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(edit_conv)
     
@@ -1682,7 +1677,6 @@ def main():
             REPORT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_report_reason)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(report_conv)
     
@@ -1694,7 +1688,6 @@ def main():
             JOB_REQUEST_STATE + 1: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_job_set)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(job_conv)
     
@@ -1708,7 +1701,6 @@ def main():
             BANK_PASSWORD_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bank_reject_reason)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(reject_conv)
     
@@ -1719,7 +1711,6 @@ def main():
             ADMIN_BROADCAST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_receive)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(broadcast_conv)
     
@@ -1730,7 +1721,6 @@ def main():
             ADMIN_BACKUP_STATE: [MessageHandler(filters.Document.ALL, admin_backup_import_file)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-        per_message=True
     )
     app.add_handler(backup_import_conv)
     
@@ -1742,7 +1732,7 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_logs_page_handler, pattern='^admin_logs_page_'))
     app.add_handler(CallbackQueryHandler(admin_backup_menu, pattern='^admin_backup$'))
     app.add_handler(CallbackQueryHandler(admin_backup_export, pattern='^admin_backup_export$'))
-    app.add_handler(CallbackQueryHandler(admin_toggle_bot, pattern='^admin_toggle_bot$'))  # رفع تایپو
+    app.add_handler(CallbackQueryHandler(admin_toggle_bot, pattern='^admin_toggle_bot$'))
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'))
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_panel$'))
     
@@ -1760,22 +1750,6 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_cancel_exile, pattern='^admin_cancel_exile$'))
     
     print("✅ ربات ثبت احوال کملوت با تمام تغییرات راه‌اندازی شد!")
-
-# قبل از app.run_polling() این خط رو اضافه کن
-import asyncio
-
-async def main_async():
-    init_db()
-    if get_config('bot_status') is None:
-        set_config('bot_status', 'on')
-    app = Application.builder().token(BOT_TOKEN).build()
-    # ... همه handlerها ...
-    await app.bot.delete_webhook(drop_pending_updates=True)
-    await app.run_polling()
-
-if __name__ == '__main__':
-    asyncio.run(main_async())
-  
     app.run_polling()
 
 if __name__ == '__main__':
