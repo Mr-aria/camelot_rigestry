@@ -1760,6 +1760,22 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_cancel_exile, pattern='^admin_cancel_exile$'))
     
     print("✅ ربات ثبت احوال کملوت با تمام تغییرات راه‌اندازی شد!")
+
+# قبل از app.run_polling() این خط رو اضافه کن
+import asyncio
+
+async def main_async():
+    init_db()
+    if get_config('bot_status') is None:
+        set_config('bot_status', 'on')
+    app = Application.builder().token(BOT_TOKEN).build()
+    # ... همه handlerها ...
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    await app.run_polling()
+
+if __name__ == '__main__':
+    asyncio.run(main_async())
+  
     app.run_polling()
 
 if __name__ == '__main__':
