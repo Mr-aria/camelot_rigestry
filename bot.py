@@ -12,7 +12,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 
 # ==================== تنظیمات اولیه ====================
-BOT_TOKEN = "8596883196:AAH6B9H41HDCsEcq5WB9ESXkDH7qYaP93lA"
+BOT_TOKEN = "AAH6B9H41HDCsEcq5WB9ESXkDH7qYaP93lA"
 OWNER_ID = 1275490079
 TEHRAN_TZ = pytz.timezone('Asia/Tehran')
 
@@ -570,7 +570,7 @@ async def back_to_menu(update: Update, context):
     user_id = update.effective_user.id
     await query.edit_message_text("🏰 منوی اصلی کملوت", reply_markup=main_menu_keyboard(user_id))
 
-# ==================== پنل مدیریت ====================
+# ==================== پنل مدیریت (نسخه جدید) ====================
 async def panel_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -689,7 +689,7 @@ async def admin_toggle_bot(update: Update, context):
         parse_mode='Markdown'
     )
 
-# ==================== مدیریت کاربران (فقط مالک) ====================
+# ==================== مدیریت کاربران (نسخه جدید) ====================
 USERS_PER_PAGE = 10
 LOGS_PER_PAGE = 10
 ADMIN_EDIT_STATE = 200
