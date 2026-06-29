@@ -312,6 +312,10 @@ def main_menu_keyboard(user_id):
     ]
     if user_id == OWNER_ID:
         keyboard.append([InlineKeyboardButton("👑 پنل مدیریت", callback_data="panel")])
+    else:
+        user = get_user_by_telegram_id(user_id)
+        if user and user['role'] == 'کارمند':
+            keyboard.append([InlineKeyboardButton("👑 پنل مدیریت", callback_data="panel")])
     return InlineKeyboardMarkup(keyboard)
 
 # ==================== شروع و ثبت‌نام ====================
@@ -580,22 +584,31 @@ async def panel_callback(update: Update, context):
         await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
         return
     
-    if user['role'] != 'مالک':
-        await query.edit_message_text("⛔ دسترسی ندارید.", reply_markup=main_menu_keyboard(user_id))
+    role = user['role']
+    
+    if role == 'مالک':
+        keyboard = [
+            [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
+            [InlineKeyboardButton("📜 تغییر قوانین", callback_data="admin_edit_rules")],
+            [InlineKeyboardButton("💬 تغییر پیام خوش‌آمد", callback_data="admin_edit_welcome")],
+            [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
+            [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
+            [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
+            [InlineKeyboardButton("🔴 خاموش/روشن کردن ربات", callback_data="admin_toggle_bot")],
+            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
+        ]
+    elif role == 'کارمند':
+        keyboard = [
+            [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
+            [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
+            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
+        ]
+    else:
+        await query.edit_message_text("⛔ شما دسترسی به پنل مدیریت ندارید.", reply_markup=main_menu_keyboard(user_id))
         return
     
-    keyboard = [
-        [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
-        [InlineKeyboardButton("📜 تغییر قوانین", callback_data="admin_edit_rules")],
-        [InlineKeyboardButton("💬 تغییر پیام خوش‌آمد", callback_data="admin_edit_welcome")],
-        [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
-        [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
-        [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
-        [InlineKeyboardButton("🔴 خاموش/روشن کردن ربات", callback_data="admin_toggle_bot")],
-        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
-    ]
     await query.edit_message_text(
-        f"👑 **پنل مدیریت (مالک)**\n🕐 {get_jalali_date()}",
+        f"👑 **پنل مدیریت ({get_role_display(role)})**\n🕐 {get_jalali_date()}",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
@@ -689,7 +702,7 @@ async def admin_toggle_bot(update: Update, context):
         parse_mode='Markdown'
     )
 
-# ==================== مدیریت کاربران (فقط مالک) ====================
+# ==================== مدیریت کاربران ====================
 USERS_PER_PAGE = 10
 LOGS_PER_PAGE = 10
 ADMIN_EDIT_STATE = 200
@@ -698,12 +711,13 @@ ADMIN_BACKUP_STATE = 500
 ADMIN_USER_MANAGE_STATE = 600
 
 async def admin_users_list(update: Update, context):
-    """لیست همه کاربران - نسخه ساده و تست‌شده"""
+    """لیست کاربران با دسترسی‌های متفاوت برای مالک و کارمند"""
     query = update.callback_query
     await query.answer()
     
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    user = get_user_by_telegram_id(user_id)
+    if not user or user['role'] not in ['مالک', 'کارمند']:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     
@@ -720,11 +734,19 @@ async def admin_users_list(update: Update, context):
         )
         return
     
+    is_owner = (user['role'] == 'مالک')
     text = "👥 **لیست کاربران کملوت**\n━━━━━━━━━━━━━━━━━━━\n"
+    
     for idx, u in enumerate(all_users[:20], 1):
         text += f"**{idx}. {u['real_name']}** ({u['camelot_name']})\n"
         text += f"🆔 کدملی: {u['national_id'] or '—'}\n"
+        text += f"🎂 سن: {u['age'] if u['age'] else 'ثبت نشده'}\n"
+        text += f"⚧️ جنسیت: {u['gender']}\n"
         text += f"👑 نقش: {get_role_display(u['role'])}\n"
+        if is_owner:
+            text += f"📱 آیدی: {u['telegram_id']}\n"
+            text += f"📱 یوزرنیم: @{u['telegram_username'] or 'ندارد'}\n"
+            text += f"📅 ثبت: {u['register_date_shamsi']} - {u['register_time']}\n"
         text += f"━━━━━━━━━━━━━━━━━━━\n"
     
     if len(all_users) > 20:
@@ -746,7 +768,8 @@ async def admin_manage_user_start(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    user = get_user_by_telegram_id(user_id)
+    if not user or user['role'] not in ['مالک', 'کارمند']:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     await query.edit_message_text(
@@ -760,7 +783,8 @@ async def admin_manage_user_start(update: Update, context):
 async def admin_manage_user_receive(update: Update, context):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    user = get_user_by_telegram_id(user_id)
+    if not user or user['role'] not in ['مالک', 'کارمند']:
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     if text.lower() == '/cancel':
@@ -777,7 +801,9 @@ async def admin_manage_user_receive(update: Update, context):
         return ADMIN_USER_MANAGE_STATE
     
     context.user_data['manage_target'] = target_telegram_id
+    is_owner = (user['role'] == 'مالک')
     
+    # اطلاعات پایه (مشترک برای مالک و کارمند)
     info_text = f"""👤 **اطلاعات کاربر**
 ━━━━━━━━━━━━━━━━━━━
 📛 **نام واقعی:** {target_user['real_name']}
@@ -786,22 +812,36 @@ async def admin_manage_user_receive(update: Update, context):
 🗡️ **نام کملوتی:** {target_user['camelot_name']}
 🆔 **کد ملی:** {target_user['national_id']}
 👑 **نقش:** {get_role_display(target_user['role'])}
-📱 **آیدی تلگرام:** {target_user['telegram_id']}
+"""
+    if is_owner:
+        info_text += f"""📱 **آیدی تلگرام:** {target_user['telegram_id']}
 📱 **یوزرنیم:** @{target_user['telegram_username'] or 'ندارد'}
 📅 **تاریخ ثبت:** {target_user['register_date_shamsi']} - {target_user['register_time']}
-━━━━━━━━━━━━━━━━━━━
 """
-    keyboard = [
-        [InlineKeyboardButton("✏️ تغییر نام واقعی", callback_data=f"admin_edit_realname_{target_telegram_id}")],
-        [InlineKeyboardButton("✏️ تغییر نام کملوتی", callback_data=f"admin_edit_camelot_{target_telegram_id}")],
-        [InlineKeyboardButton("✏️ تغییر سن", callback_data=f"admin_edit_age_{target_telegram_id}")],
-        [InlineKeyboardButton("✏️ تغییر یوزرنیم", callback_data=f"admin_edit_username_{target_telegram_id}")],
-        [InlineKeyboardButton("✏️ تغییر کد ملی", callback_data=f"admin_edit_national_{target_telegram_id}")],
-        [InlineKeyboardButton("👑 تغییر نقش", callback_data=f"admin_change_role_{target_telegram_id}")],
-        [InlineKeyboardButton("🚫 اخراج شهروند", callback_data=f"admin_exile_{target_telegram_id}")],
-        [InlineKeyboardButton("📨 گزارش به مدیریت", callback_data=f"admin_report_{target_telegram_id}")],
-        [InlineKeyboardButton("🔙 بازگشت به لیست", callback_data="admin_users")],
-    ]
+    info_text += "━━━━━━━━━━━━━━━━━━━"
+    
+    # دکمه‌ها بر اساس نقش
+    if is_owner:
+        keyboard = [
+            [InlineKeyboardButton("✏️ تغییر نام واقعی", callback_data=f"admin_edit_realname_{target_telegram_id}")],
+            [InlineKeyboardButton("✏️ تغییر نام کملوتی", callback_data=f"admin_edit_camelot_{target_telegram_id}")],
+            [InlineKeyboardButton("✏️ تغییر سن", callback_data=f"admin_edit_age_{target_telegram_id}")],
+            [InlineKeyboardButton("✏️ تغییر یوزرنیم", callback_data=f"admin_edit_username_{target_telegram_id}")],
+            [InlineKeyboardButton("✏️ تغییر کد ملی", callback_data=f"admin_edit_national_{target_telegram_id}")],
+            [InlineKeyboardButton("👑 تغییر نقش", callback_data=f"admin_change_role_{target_telegram_id}")],
+            [InlineKeyboardButton("🚫 اخراج شهروند", callback_data=f"admin_exile_{target_telegram_id}")],
+            [InlineKeyboardButton("📨 گزارش به مدیریت", callback_data=f"admin_report_{target_telegram_id}")],
+            [InlineKeyboardButton("🔙 بازگشت به لیست", callback_data="admin_users")],
+        ]
+    else:  # کارمند
+        keyboard = [
+            [InlineKeyboardButton("✏️ تغییر نام واقعی", callback_data=f"admin_edit_realname_{target_telegram_id}")],
+            [InlineKeyboardButton("✏️ تغییر نام کملوتی", callback_data=f"admin_edit_camelot_{target_telegram_id}")],
+            [InlineKeyboardButton("✏️ تغییر سن", callback_data=f"admin_edit_age_{target_telegram_id}")],
+            [InlineKeyboardButton("📨 گزارش به مدیریت", callback_data=f"admin_report_{target_telegram_id}")],
+            [InlineKeyboardButton("🔙 بازگشت به لیست", callback_data="admin_users")],
+        ]
+    
     await update.message.reply_text(info_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     return ConversationHandler.END
 
@@ -810,9 +850,16 @@ async def admin_edit_field_start(update: Update, context, field_name, target_tel
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    user = get_user_by_telegram_id(user_id)
+    if not user or user['role'] not in ['مالک', 'کارمند']:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
+    
+    # کارمند فقط می‌تونه نام واقعی، نام کملوتی و سن رو تغییر بده
+    if user['role'] == 'کارمند' and field_name not in ['real_name', 'camelot', 'age']:
+        await query.edit_message_text("⛔ شما اجازه تغییر این فیلد را ندارید.")
+        return
+    
     context.user_data['edit_field'] = field_name
     context.user_data['edit_target'] = target_telegram_id
     field_names = {
@@ -833,7 +880,8 @@ async def admin_edit_field_start(update: Update, context, field_name, target_tel
 async def admin_edit_value(update: Update, context):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    user = get_user_by_telegram_id(user_id)
+    if not user or user['role'] not in ['مالک', 'کارمند']:
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     if text.lower() == '/cancel':
@@ -887,6 +935,10 @@ async def admin_edit_value(update: Update, context):
             return ADMIN_EDIT_STATE
     
     elif field == 'username':
+        # فقط مالک
+        if user['role'] != 'مالک':
+            await update.message.reply_text("⛔ دسترسی ندارید.")
+            return ConversationHandler.END
         new_un = text.lstrip('@')
         update_user_field(target, 'telegram_username', new_un)
         add_system_log('admin_action', f'تغییر یوزرنیم {old_user["camelot_name"]}', f'یوزرنیم جدید: @{new_un}', actor_id=user_id, target_id=target)
@@ -897,6 +949,10 @@ async def admin_edit_value(update: Update, context):
         await update.message.reply_text(f"✅ یوزرنیم به `@{new_un}` تغییر یافت.", parse_mode='Markdown')
     
     elif field == 'national':
+        # فقط مالک
+        if user['role'] != 'مالک':
+            await update.message.reply_text("⛔ دسترسی ندارید.")
+            return ConversationHandler.END
         if len(text) != 6 or not text.isdigit():
             await update.message.reply_text("❌ کد ملی ۶ رقم است.")
             return ADMIN_EDIT_STATE
@@ -916,7 +972,7 @@ async def admin_edit_value(update: Update, context):
     context.user_data.pop('edit_target', None)
     return ConversationHandler.END
 
-# ==================== تغییر نقش به صورت انتخابی ====================
+# ==================== تغییر نقش (فقط مالک) ====================
 async def admin_change_role(update: Update, context, target_telegram_id):
     query = update.callback_query
     await query.answer()
@@ -974,7 +1030,7 @@ async def admin_set_role(update: Update, context):
         parse_mode='Markdown'
     )
 
-# ==================== اخراج شهروند ====================
+# ==================== اخراج شهروند (فقط مالک) ====================
 async def admin_exile_user(update: Update, context, target_telegram_id):
     query = update.callback_query
     await query.answer()
@@ -1035,9 +1091,9 @@ async def admin_report_start(update: Update, context, target_telegram_id):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    actor = get_user_by_telegram_id(user_id)
-    if not actor or actor['role'] not in ['کارمند', 'شاه', 'مالک']:
-        await query.edit_message_text("⛔ فقط کارمندان و بالاتر می‌توانند گزارش دهند.")
+    user = get_user_by_telegram_id(user_id)
+    if not user or user['role'] not in ['کارمند', 'مالک']:
+        await query.edit_message_text("⛔ فقط کارمندان و مالک می‌توانند گزارش دهند.")
         return
     context.user_data['report_target'] = target_telegram_id
     await query.edit_message_text(
@@ -1066,9 +1122,9 @@ async def admin_report_reason(update: Update, context):
         await update.message.reply_text("❌ کاربر یافت نشد.")
         return ConversationHandler.END
     
-    report_text = f"""📨 **گزارش جدید از سوی کارمند**
+    report_text = f"""📨 **گزارش جدید از سوی {get_role_display(actor['role'])}**
 
-👤 **کارمند گزارش‌دهنده:** {actor['real_name']} ({actor['camelot_name']})
+👤 **گزارش‌دهنده:** {actor['real_name']} ({actor['camelot_name']})
 🆔 آیدی: {actor['telegram_id']}
 👑 نقش: {get_role_display(actor['role'])}
 
@@ -1104,7 +1160,8 @@ async def admin_broadcast_start(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    user = get_user_by_telegram_id(user_id)
+    if not user or user['role'] not in ['مالک', 'کارمند']:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     await query.edit_message_text(
@@ -1118,7 +1175,8 @@ async def admin_broadcast_start(update: Update, context):
 async def admin_broadcast_receive(update: Update, context):
     text = update.message.text
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    user = get_user_by_telegram_id(user_id)
+    if not user or user['role'] not in ['مالک', 'کارمند']:
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     if text.lower() == '/cancel':
@@ -1153,7 +1211,7 @@ async def admin_broadcast_receive(update: Update, context):
     )
     return ConversationHandler.END
 
-# ==================== لاگ‌های سیستم ====================
+# ==================== لاگ‌های سیستم (فقط مالک) ====================
 async def admin_logs_list(update: Update, context, page=0):
     query = update.callback_query
     await query.answer()
@@ -1198,7 +1256,7 @@ async def admin_logs_page_handler(update: Update, context):
     page = int(query.data.split('_')[3])
     await admin_logs_list(update, context, page)
 
-# ==================== پشتیبان‌گیری و بازیابی ====================
+# ==================== پشتیبان‌گیری و بازیابی (فقط مالک) ====================
 async def admin_backup_menu(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -1357,7 +1415,7 @@ def main():
     )
     app.add_handler(edit_conv)
     
-    # ---------- گزارش کارمند ----------
+    # ---------- گزارش ----------
     report_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(lambda u,c: admin_report_start(u,c, int(u.callback_query.data.split('_')[3])), pattern='^admin_report_')],
         states={REPORT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_report_reason)]},
@@ -1381,16 +1439,14 @@ def main():
     )
     app.add_handler(backup_import_conv)
     
-    # ---------- کالبک‌های اصلی (مهم‌ترین بخش) ----------
+    # ---------- کالبک‌های اصلی ----------
     app.add_handler(CallbackQueryHandler(panel_callback, pattern='^panel$'))
-    app.add_handler(CallbackQueryHandler(admin_users_list, pattern='^admin_users$'))  # <--- این خط مهمه
-    
+    app.add_handler(CallbackQueryHandler(admin_users_list, pattern='^admin_users$'))
     app.add_handler(CallbackQueryHandler(my_info_callback, pattern='^my_info$'))
     app.add_handler(CallbackQueryHandler(notifications_callback, pattern='^notifications$'))
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'))
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_panel$'))
     
-    # ---------- بقیه کالبک‌ها ----------
     app.add_handler(CallbackQueryHandler(admin_logs_list, pattern='^admin_logs$'))
     app.add_handler(CallbackQueryHandler(admin_logs_page_handler, pattern='^admin_logs_page_'))
     app.add_handler(CallbackQueryHandler(admin_backup_menu, pattern='^admin_backup$'))
