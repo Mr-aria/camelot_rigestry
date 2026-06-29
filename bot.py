@@ -12,7 +12,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 
 # ==================== تنظیمات اولیه ====================
-BOT_TOKEN = "AAH6B9H41HDCsEcq5WB9ESXkDH7qYaP93lA"
+BOT_TOKEN ="AAH6B9H41HDCsEcq5WB9ESXkDH7qYaP93lA"
 OWNER_ID = 1275490079
 TEHRAN_TZ = pytz.timezone('Asia/Tehran')
 
