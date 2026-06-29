@@ -319,6 +319,7 @@ def main_menu_keyboard(user_id):
 
 RESTORE_BACKUP_STATE = 800
 REPORT_REASON = 700
+EDIT_RULES_STATE = 900
 
 async def start(update: Update, context):
     user_id = update.effective_user.id
@@ -586,6 +587,7 @@ async def panel_callback(update: Update, context):
     
     keyboard = [
         [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
+        [InlineKeyboardButton("📜 تغییر قوانین", callback_data="admin_edit_rules")],
         [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
         [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
         [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
@@ -597,6 +599,41 @@ async def panel_callback(update: Update, context):
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
+
+# ==================== تغییر قوانین ====================
+async def admin_edit_rules_start(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    current_rules = get_config('rules_text') or "قوانین کملوت"
+    await query.edit_message_text(
+        f"📜 **قوانین فعلی:**\n{current_rules}\n\n"
+        "لطفاً متن جدید قوانین را وارد کنید:\n"
+        "(برای لغو /cancel بزنید)",
+        parse_mode='Markdown'
+    )
+    return EDIT_RULES_STATE
+
+async def admin_edit_rules_receive(update: Update, context):
+    text = update.message.text
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ دسترسی ندارید.")
+        return ConversationHandler.END
+    if text.lower() == '/cancel':
+        await update.message.reply_text("❌ تغییر قوانین لغو شد.", reply_markup=main_menu_keyboard(user_id))
+        return ConversationHandler.END
+    
+    set_config('rules_text', text)
+    add_system_log('admin_action', 'تغییر قوانین', f'متن جدید: {text[:100]}...', actor_id=user_id)
+    await update.message.reply_text(
+        "✅ **قوانین با موفقیت به‌روز شد.**",
+        reply_markup=main_menu_keyboard(user_id)
+    )
+    return ConversationHandler.END
 
 # ==================== خاموش/روشن کردن ربات ====================
 async def admin_toggle_bot(update: Update, context):
@@ -1257,6 +1294,16 @@ def main():
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(restore_conv)
+    
+    # تغییر قوانین
+    edit_rules_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_edit_rules_start, pattern='^admin_edit_rules$')],
+        states={
+            EDIT_RULES_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_rules_receive)],
+        },
+        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+    )
+    app.add_handler(edit_rules_conv)
     
     # مدیریت کاربر با آیدی (مالک)
     manage_conv = ConversationHandler(
