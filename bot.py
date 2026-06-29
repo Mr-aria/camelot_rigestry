@@ -570,7 +570,7 @@ async def back_to_menu(update: Update, context):
     user_id = update.effective_user.id
     await query.edit_message_text("🏰 منوی اصلی کملوت", reply_markup=main_menu_keyboard(user_id))
 
-# ==================== پنل مدیریت (نسخه جدید) ====================
+# ==================== پنل مدیریت ====================
 async def panel_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -689,7 +689,7 @@ async def admin_toggle_bot(update: Update, context):
         parse_mode='Markdown'
     )
 
-# ==================== مدیریت کاربران (نسخه جدید) ====================
+# ==================== مدیریت کاربران (فقط مالک) ====================
 USERS_PER_PAGE = 10
 LOGS_PER_PAGE = 10
 ADMIN_EDIT_STATE = 200
@@ -697,9 +697,11 @@ ADMIN_BROADCAST_STATE = 300
 ADMIN_BACKUP_STATE = 500
 ADMIN_USER_MANAGE_STATE = 600
 
-async def admin_users_list(update: Update, context, page=0):
+async def admin_users_list(update: Update, context):
+    """لیست همه کاربران - نسخه ساده و تست‌شده"""
     query = update.callback_query
     await query.answer()
+    
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
@@ -707,50 +709,39 @@ async def admin_users_list(update: Update, context, page=0):
     
     all_users = get_all_citizens()
     total = len(all_users)
+    
     if total == 0:
         await query.edit_message_text(
             "📭 **هیچ شهروندی ثبت‌نام نکرده است.**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]]),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]
+            ]),
             parse_mode='Markdown'
         )
         return
     
-    offset = page * USERS_PER_PAGE
-    users_page = all_users[offset:offset+USERS_PER_PAGE]
-    
-    text = f"👥 **لیست شهروندان کملوت**\n━━━━━━━━━━━━━━━━━━━\n"
-    text += f"تعداد کل: {total} | صفحه {page+1}\n━━━━━━━━━━━━━━━━━━━\n\n"
-    
-    for idx, u in enumerate(users_page, start=offset+1):
-        reversed_num = total - (offset + idx) + 1
-        text += f"**{reversed_num}. {u['real_name']}** ({u['camelot_name']})\n"
-        text += f"🆔 کدملی: {u['national_id']}\n"
-        text += f"🎂 سن: {u['age'] if u['age'] else 'ثبت نشده'}\n"
+    text = "👥 **لیست کاربران کملوت**\n━━━━━━━━━━━━━━━━━━━\n"
+    for idx, u in enumerate(all_users[:20], 1):
+        text += f"**{idx}. {u['real_name']}** ({u['camelot_name']})\n"
+        text += f"🆔 کدملی: {u['national_id'] or '—'}\n"
         text += f"👑 نقش: {get_role_display(u['role'])}\n"
-        text += f"📱 آیدی: {u['telegram_id']}\n"
-        text += f"📱 یوزرنیم: @{u['telegram_username'] or 'ندارد'}\n"
-        text += f"📅 ثبت: {u['register_date_shamsi']} - {u['register_time']}\n"
         text += f"━━━━━━━━━━━━━━━━━━━\n"
     
-    keyboard = []
-    nav_buttons = []
-    total_pages = (total + USERS_PER_PAGE - 1) // USERS_PER_PAGE
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"admin_users_page_{page-1}"))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("➡️ بعدی", callback_data=f"admin_users_page_{page+1}"))
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    keyboard.append([InlineKeyboardButton("🔍 مدیریت کاربر با آیدی", callback_data="admin_manage_user")])
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel")])
+    if len(all_users) > 20:
+        text += f"\n... و {len(all_users) - 20} کاربر دیگر"
     
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    keyboard = [
+        [InlineKeyboardButton("🔍 مدیریت کاربر با آیدی", callback_data="admin_manage_user")],
+        [InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel")],
+    ]
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
 
-async def admin_users_page_handler(update: Update, context):
-    query = update.callback_query
-    page = int(query.data.split('_')[3])
-    await admin_users_list(update, context, page)
-
+# ==================== مدیریت کاربر با آیدی ====================
 async def admin_manage_user_start(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -1304,7 +1295,7 @@ def main():
     
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # ثبت‌نام
+    # ---------- ثبت‌نام ----------
     reg_conv = ConversationHandler(
         entry_points=[CommandHandler('start', start), CallbackQueryHandler(start_registration_callback, pattern='^start_registration$')],
         states={
@@ -1320,47 +1311,39 @@ def main():
     )
     app.add_handler(reg_conv)
     
-    # بازگردانی پشتیبان برای مالک
+    # ---------- بازگردانی پشتیبان ----------
     restore_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(restore_backup_callback, pattern='^restore_backup$')],
-        states={
-            RESTORE_BACKUP_STATE: [MessageHandler(filters.Document.ALL, restore_backup_file)],
-        },
+        states={RESTORE_BACKUP_STATE: [MessageHandler(filters.Document.ALL, restore_backup_file)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(restore_conv)
     
-    # تغییر قوانین
+    # ---------- تغییر قوانین ----------
     edit_rules_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_edit_rules_start, pattern='^admin_edit_rules$')],
-        states={
-            EDIT_RULES_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_rules_receive)],
-        },
+        states={EDIT_RULES_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_rules_receive)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(edit_rules_conv)
     
-    # تغییر پیام خوش‌آمد
+    # ---------- تغییر پیام خوش‌آمد ----------
     edit_welcome_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_edit_welcome_start, pattern='^admin_edit_welcome$')],
-        states={
-            EDIT_WELCOME_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_welcome_receive)],
-        },
+        states={EDIT_WELCOME_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_welcome_receive)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(edit_welcome_conv)
     
-    # مدیریت کاربر با آیدی (مالک)
+    # ---------- مدیریت کاربر با آیدی ----------
     manage_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_manage_user_start, pattern='^admin_manage_user$')],
-        states={
-            ADMIN_USER_MANAGE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_manage_user_receive)],
-        },
+        states={ADMIN_USER_MANAGE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_manage_user_receive)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(manage_conv)
     
-    # ویرایش فیلدها (مالک)
+    # ---------- ویرایش فیلدها ----------
     edit_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(lambda u,c: admin_edit_field_start(u,c, 'real_name', int(u.callback_query.data.split('_')[3])), pattern='^admin_edit_realname_'),
@@ -1369,59 +1352,52 @@ def main():
             CallbackQueryHandler(lambda u,c: admin_edit_field_start(u,c, 'username', int(u.callback_query.data.split('_')[3])), pattern='^admin_edit_username_'),
             CallbackQueryHandler(lambda u,c: admin_edit_field_start(u,c, 'national', int(u.callback_query.data.split('_')[3])), pattern='^admin_edit_national_'),
         ],
-        states={
-            ADMIN_EDIT_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_value)],
-        },
+        states={ADMIN_EDIT_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_value)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(edit_conv)
     
-    # گزارش کارمند
+    # ---------- گزارش کارمند ----------
     report_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(lambda u,c: admin_report_start(u,c, int(u.callback_query.data.split('_')[3])), pattern='^admin_report_')],
-        states={
-            REPORT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_report_reason)],
-        },
+        states={REPORT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_report_reason)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(report_conv)
     
-    # ارسال پیام همگانی
+    # ---------- ارسال پیام همگانی ----------
     broadcast_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern='^admin_broadcast$')],
-        states={
-            ADMIN_BROADCAST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_receive)],
-        },
+        states={ADMIN_BROADCAST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_receive)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(broadcast_conv)
     
-    # پشتیبان‌گیری - بازیابی
+    # ---------- پشتیبان‌گیری ----------
     backup_import_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_backup_import_start, pattern='^admin_backup_import$')],
-        states={
-            ADMIN_BACKUP_STATE: [MessageHandler(filters.Document.ALL, admin_backup_import_file)],
-        },
+        states={ADMIN_BACKUP_STATE: [MessageHandler(filters.Document.ALL, admin_backup_import_file)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(backup_import_conv)
     
-    # کالبک‌های اصلی
+    # ---------- کالبک‌های اصلی (مهم‌ترین بخش) ----------
     app.add_handler(CallbackQueryHandler(panel_callback, pattern='^panel$'))
-    app.add_handler(CallbackQueryHandler(admin_users_list, pattern='^admin_users$'))
-    app.add_handler(CallbackQueryHandler(admin_users_page_handler, pattern='^admin_users_page_'))
+    app.add_handler(CallbackQueryHandler(admin_users_list, pattern='^admin_users$'))  # <--- این خط مهمه
+    
+    app.add_handler(CallbackQueryHandler(my_info_callback, pattern='^my_info$'))
+    app.add_handler(CallbackQueryHandler(notifications_callback, pattern='^notifications$'))
+    app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'))
+    app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_panel$'))
+    
+    # ---------- بقیه کالبک‌ها ----------
     app.add_handler(CallbackQueryHandler(admin_logs_list, pattern='^admin_logs$'))
     app.add_handler(CallbackQueryHandler(admin_logs_page_handler, pattern='^admin_logs_page_'))
     app.add_handler(CallbackQueryHandler(admin_backup_menu, pattern='^admin_backup$'))
     app.add_handler(CallbackQueryHandler(admin_backup_export, pattern='^admin_backup_export$'))
     app.add_handler(CallbackQueryHandler(admin_toggle_bot, pattern='^admin_toggle_bot$'))
-    app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'))
-    app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_panel$'))
     
-    app.add_handler(CallbackQueryHandler(my_info_callback, pattern='^my_info$'))
-    app.add_handler(CallbackQueryHandler(notifications_callback, pattern='^notifications$'))
-    
-    # تغییر نقش به صورت انتخابی
+    # تغییر نقش
     app.add_handler(CallbackQueryHandler(lambda u,c: admin_change_role(u,c, int(u.callback_query.data.split('_')[3])), pattern='^admin_change_role_'))
     app.add_handler(CallbackQueryHandler(admin_set_role, pattern='^admin_set_role_'))
     
