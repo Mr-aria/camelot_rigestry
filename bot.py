@@ -79,6 +79,7 @@ def init_db():
     
     defaults = [
         ('rules_text', 'قوانین سرزمین کملوت:\n1. احترام به یکدیگر\n2. همکاری با شوالیه‌ها\n3. جادو فقط در محدوده مجاز'),
+        ('welcome_text', 'سلام، ای مهمان گرانقدر! 🏰✨\nبه سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟'),
         ('group_link_1', 'https://t.me/YourGroup1'),
         ('group_link_2', 'https://t.me/YourGroup2'),
         ('group_link_3', 'https://t.me/YourGroup3'),
@@ -320,6 +321,7 @@ def main_menu_keyboard(user_id):
 RESTORE_BACKUP_STATE = 800
 REPORT_REASON = 700
 EDIT_RULES_STATE = 900
+EDIT_WELCOME_STATE = 950
 
 async def start(update: Update, context):
     user_id = update.effective_user.id
@@ -352,10 +354,7 @@ async def start(update: Update, context):
         await update.message.reply_text("⛔ ربات در حال حاضر خاموش است. لطفاً بعداً تلاش کنید.")
         return
     
-    welcome_text = (
-        "سلام، ای مهمان گرانقدر! 🏰✨\n"
-        "به سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟"
-    )
+    welcome_text = get_config('welcome_text') or "سلام، ای مهمان گرانقدر! 🏰✨\nبه سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟"
     keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
     return WELCOME
@@ -419,7 +418,7 @@ async def confirm_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
     if query.data == "confirm_no":
-        welcome_text = "سلام، ای مهمان گرانقدر! 🏰✨ ..."
+        welcome_text = get_config('welcome_text') or "سلام، ای مهمان گرانقدر! 🏰✨ ..."
         keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
         await query.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
         return WELCOME
@@ -440,7 +439,7 @@ async def rules_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
     if query.data == "rules_cancel":
-        welcome_text = "سلام، ای مهمان گرانقدر! ..."
+        welcome_text = get_config('welcome_text') or "سلام، ای مهمان گرانقدر! ..."
         keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
         await query.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
         return WELCOME
@@ -588,6 +587,7 @@ async def panel_callback(update: Update, context):
     keyboard = [
         [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
         [InlineKeyboardButton("📜 تغییر قوانین", callback_data="admin_edit_rules")],
+        [InlineKeyboardButton("💬 تغییر پیام خوش‌آمد", callback_data="admin_edit_welcome")],
         [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
         [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
         [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
@@ -608,9 +608,9 @@ async def admin_edit_rules_start(update: Update, context):
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    current_rules = get_config('rules_text') or "قوانین کملوت"
+    current = get_config('rules_text') or "قوانین کملوت"
     await query.edit_message_text(
-        f"📜 **قوانین فعلی:**\n{current_rules}\n\n"
+        f"📜 **قوانین فعلی:**\n{current}\n\n"
         "لطفاً متن جدید قوانین را وارد کنید:\n"
         "(برای لغو /cancel بزنید)",
         parse_mode='Markdown'
@@ -631,6 +631,41 @@ async def admin_edit_rules_receive(update: Update, context):
     add_system_log('admin_action', 'تغییر قوانین', f'متن جدید: {text[:100]}...', actor_id=user_id)
     await update.message.reply_text(
         "✅ **قوانین با موفقیت به‌روز شد.**",
+        reply_markup=main_menu_keyboard(user_id)
+    )
+    return ConversationHandler.END
+
+# ==================== تغییر پیام خوش‌آمد ====================
+async def admin_edit_welcome_start(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    current = get_config('welcome_text') or "پیام خوش‌آمد پیش‌فرض"
+    await query.edit_message_text(
+        f"💬 **پیام خوش‌آمد فعلی:**\n{current}\n\n"
+        "لطفاً متن جدید پیام خوش‌آمد را وارد کنید:\n"
+        "(برای لغو /cancel بزنید)",
+        parse_mode='Markdown'
+    )
+    return EDIT_WELCOME_STATE
+
+async def admin_edit_welcome_receive(update: Update, context):
+    text = update.message.text
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ دسترسی ندارید.")
+        return ConversationHandler.END
+    if text.lower() == '/cancel':
+        await update.message.reply_text("❌ تغییر پیام خوش‌آمد لغو شد.", reply_markup=main_menu_keyboard(user_id))
+        return ConversationHandler.END
+    
+    set_config('welcome_text', text)
+    add_system_log('admin_action', 'تغییر پیام خوش‌آمد', f'متن جدید: {text[:100]}...', actor_id=user_id)
+    await update.message.reply_text(
+        "✅ **پیام خوش‌آمد با موفقیت به‌روز شد.**",
         reply_markup=main_menu_keyboard(user_id)
     )
     return ConversationHandler.END
@@ -1304,6 +1339,16 @@ def main():
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(edit_rules_conv)
+    
+    # تغییر پیام خوش‌آمد
+    edit_welcome_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_edit_welcome_start, pattern='^admin_edit_welcome$')],
+        states={
+            EDIT_WELCOME_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_welcome_receive)],
+        },
+        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+    )
+    app.add_handler(edit_welcome_conv)
     
     # مدیریت کاربر با آیدی (مالک)
     manage_conv = ConversationHandler(
