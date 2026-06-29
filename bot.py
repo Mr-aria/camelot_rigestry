@@ -7,12 +7,13 @@ from datetime import datetime as dt
 from datetime import datetime
 import pytz
 import jdatetime
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 
 # ==================== تنظیمات اولیه ====================
-BOT_TOKEN = "8596883196:AAH6B9H41HDCsEcq5WB9ESXkDH7qYaP93lA"
-OWNER_ID = 1275490079
+BOT_TOKEN = "توکن_ربات_ت_اینجا_بذار"
+OWNER_ID = 1275490079  # فقط این آیدی به پنل مدیریت دسترسی داره
 TEHRAN_TZ = pytz.timezone('Asia/Tehran')
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -29,7 +30,6 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # جدول شهروندان
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS citizens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +47,6 @@ def init_db():
         )
     ''')
     
-    # جدول لاگ‌های سیستم
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS system_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +59,6 @@ def init_db():
         )
     ''')
     
-    # جدول تنظیمات
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY,
@@ -68,12 +66,16 @@ def init_db():
         )
     ''')
     
-    # مقداردهی اولیه تنظیمات
-    cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", ('rules_text', 'قوانین سرزمین کملوت:\n1. احترام به یکدیگر\n2. همکاری با شوالیه‌ها\n3. جادو فقط در محدوده مجاز'))
-    cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", ('group_link_1', 'https://t.me/YourGroup1'))
-    cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", ('group_link_2', 'https://t.me/YourGroup2'))
-    cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", ('group_link_3', 'https://t.me/YourGroup3'))
-    cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", ('group_link_4', 'https://t.me/YourGroup4'))
+    defaults = [
+        ('rules_text', 'قوانین سرزمین کملوت:\n1. احترام به یکدیگر\n2. همکاری با شوالیه‌ها\n3. جادو فقط در محدوده مجاز'),
+        ('group_link_1', 'https://t.me/YourGroup1'),
+        ('group_link_2', 'https://t.me/YourGroup2'),
+        ('group_link_3', 'https://t.me/YourGroup3'),
+        ('group_link_4', 'https://t.me/YourGroup4'),
+        ('bot_status', 'on'),
+    ]
+    for key, value in defaults:
+        cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", (key, value))
     
     conn.commit()
     conn.close()
@@ -162,7 +164,6 @@ def update_user_field(telegram_id, field, value):
 def exile_citizen(telegram_id):
     conn = get_db_connection()
     cursor = conn.cursor()
-    # کد ملی را NULL می‌کنیم و نقش را به شهروند تغییر می‌دهیم
     cursor.execute("UPDATE citizens SET national_id = NULL, role = 'شهروند' WHERE telegram_id = ?", (telegram_id,))
     conn.commit()
     conn.close()
@@ -223,10 +224,8 @@ def import_full_backup(json_data):
     
     conn = get_db_connection()
     cursor = conn.cursor()
-    # پاک کردن جداول
     for table in ['citizens', 'system_logs', 'config']:
         cursor.execute(f"DELETE FROM {table}")
-    # درج داده‌ها
     for table, rows in backup_data['tables'].items():
         if rows:
             columns = list(rows[0].keys())
@@ -237,18 +236,10 @@ def import_full_backup(json_data):
                 try:
                     cursor.execute(f"INSERT OR REPLACE INTO {table} ({columns_str}) VALUES ({placeholders})", values)
                 except Exception as e:
-                    logger.warning(f"خطا در درج {table}: {e}")
+                    pass
     conn.commit()
     conn.close()
     return True, "بازیابی با موفقیت انجام شد"
-
-# ==================== وضعیت ربات ====================
-def is_bot_online():
-    status = get_config('bot_status')
-    return status != 'off'
-
-def set_bot_status(status):
-    set_config('bot_status', status)
 
 # ==================== توابع کمکی نمایش ====================
 def get_jalali_date():
@@ -260,9 +251,16 @@ def get_role_display(role):
     roles = {'شهروند':'شهروند', 'کارمند':'کارمند', 'شاه':'شاه', 'مالک':'مالک'}
     return roles.get(role, 'شهروند')
 
+# ✅ اصلاح شده: اگر کاربر OWNER_ID باشد، همیشه آنلاین فرض می‌شود
+def is_bot_online(user_id=None):
+    status = get_config('bot_status')
+    if user_id == OWNER_ID:
+        return True  # مالک همیشه دسترسی دارد
+    return status != 'off'
+
 # ==================== منوی اصلی ====================
 def main_menu_keyboard(user_id):
-    if not is_bot_online() and user_id != OWNER_ID:
+    if not is_bot_online(user_id):
         return None
     keyboard = [
         [InlineKeyboardButton("💰 موجودی", callback_data="balance")],
@@ -291,19 +289,14 @@ async def start(update: Update, context):
         )
         return ConversationHandler.END
     
-    if not is_bot_online() and user_id != OWNER_ID:
+    # ✅ اصلاح شده: اگر کاربر OWNER_ID باشد، حتی اگر ربات خاموش باشه اجازه دارد
+    if not is_bot_online(user_id):
         await update.message.reply_text("⛔ ربات در حال حاضر خاموش است. لطفاً بعداً تلاش کنید.")
         return
     
     welcome_text = (
         "سلام، ای مهمان گرانقدر! 🏰✨\n"
-        "به سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی، جایی که شاه آرتور بزرگ بر تخت طلایی می‌نشیند "
-        "و مرلین جادوگر از اعماق غار خرد خود بر ما نگهبانی می‌کند! 🧙‍♂️👑\n"
-        "برای آنکه نامت در سپرهای درخشان این سرزمین ثبت شود و شهروندی شرافتمند باشی، "
-        "نخست باید شناسنامه‌ای از جنس نور دریافت کنی و کد ملی‌ات را از سنگ‌های جادویی بگیری "
-        "تا دروازه‌های کملوت به روت گشوده شود و از نعمت‌های پادشاهی بهره‌مند گردی! ⚔️🛡️\n"
-        "آیا دلت می‌خواهد نامت را در تاریخ کملوت بنویسی؟ آنگاه بر دکمه‌ای که در پیش روی توست بزن "
-        "و به درون این سرزمین افسانه‌ای گام نه! 🚪🌟"
+        "به سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟"
     )
     keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -321,10 +314,7 @@ async def receive_real_name(update: Update, context):
         [InlineKeyboardButton("👧 دختر", callback_data="gender_girl")],
         [InlineKeyboardButton("👦 پسر", callback_data="gender_boy")]
     ]
-    await update.message.reply_text(
-        "⚧️ جنسیت خود را انتخاب کن:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text("⚧️ جنسیت خود را انتخاب کن:", reply_markup=InlineKeyboardMarkup(keyboard))
     return WAITING_GENDER
 
 async def receive_gender_callback(update: Update, context):
@@ -332,10 +322,7 @@ async def receive_gender_callback(update: Update, context):
     await query.answer()
     gender = "دختر" if query.data == "gender_girl" else "پسر"
     context.user_data['gender'] = gender
-    await query.message.reply_text(
-        f"✅ جنسیت شما: {gender}\n"
-        "🗡️ حالا **نام کملوتی** خود را (نام مستعار در سرزمین) انتخاب کن:"
-    )
+    await query.message.reply_text(f"✅ جنسیت شما: {gender}\n🗡️ حالا **نام کملوتی** خود را انتخاب کن:")
     return WAITING_CAMELOT_NAME
 
 async def receive_camelot_name(update: Update, context):
@@ -355,16 +342,12 @@ async def receive_age(update: Update, context):
     
     data = context.user_data
     summary = (
-        f"📋 **فرم ثبت‌نام شما**\n"
-        f"─────────────────\n"
+        f"📋 **فرم ثبت‌نام شما**\n─────────────────\n"
         f"👤 اسم واقعی: {data['real_name']}\n"
         f"⚧️ جنسیت: {data['gender']}\n"
         f"🗡️ نام کملوتی: {data['camelot_name']}\n"
-        f"🎂 سن: {data['age']}\n"
-        f"─────────────────\n"
+        f"🎂 سن: {data['age']}\n─────────────────\n"
         f"⚠️ **توجه**: این اطلاعات قابل تغییر نیست.\n"
-        f"اگر اشتباه وارد کرده باشی، طبق قانون کملوت، مجازیم به جرم ارائه اطلاعات غلط و مخفی‌کاری، "
-        f"شناسنامه‌ات را باطل و حق شهروندی‌ات را ازت بگیریم.\n"
         f"آیا تایید می‌کنی؟"
     )
     keyboard = [
@@ -377,24 +360,19 @@ async def receive_age(update: Update, context):
 async def confirm_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
-    
     if query.data == "confirm_no":
-        welcome_text = (
-            "سلام، ای مهمان گرانقدر! 🏰✨\n"
-            "به سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... (همان متن قبلی)"
-        )
+        welcome_text = "سلام، ای مهمان گرانقدر! 🏰✨ ..."
         keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
         await query.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
         return WELCOME
     
-    rules_text = get_config('rules_text') or "قوانین کملوت (مقدار پیش‌فرض)"
+    rules_text = get_config('rules_text') or "قوانین کملوت"
     keyboard = [
         [InlineKeyboardButton("✅ تایید میکنم", callback_data="rules_accept")],
         [InlineKeyboardButton("❌ لغو", callback_data="rules_cancel")]
     ]
     await query.message.reply_text(
-        f"📜 **قوانین سرزمین کملوت**\n\n{rules_text}\n\n"
-        "با ادامه دادن و ثبت نهایی اطلاعات و دریافت کد ملی، شما تمامی قوانین ما را می‌پذیرید و ملزم به رعایت آنها هستید و قبول میکنید در صورت تخلف و دادگاهی شدن در این سرزمین، حکم دادگاه را می‌پذیرید.",
+        f"📜 **قوانین سرزمین کملوت**\n\n{rules_text}\n\nبا ادامه دادن، تمامی قوانین را می‌پذیرید.",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
@@ -403,9 +381,8 @@ async def confirm_callback(update: Update, context):
 async def rules_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
-    
     if query.data == "rules_cancel":
-        welcome_text = "سلام، ای مهمان گرانقدر! ... (متن خوش‌آمد)"
+        welcome_text = "سلام، ای مهمان گرانقدر! ..."
         keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
         await query.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
         return WELCOME
@@ -420,28 +397,18 @@ async def rules_callback(update: Update, context):
         'age': context.user_data['age'],
         'camelot_name': context.user_data['camelot_name']
     }
-    
     national_id = save_citizen(data)
     add_system_log('registration', 'ثبت‌نام جدید', f'کاربر: {data["camelot_name"]} - کد ملی: {national_id}', actor_id=user.id)
     
     await query.message.reply_text(
-        f"📝 درخواست شهروندی شما با موفقیت ثبت و تایید شد.\n\n"
-        f"🪪 کد ملی شما: `{national_id}`",
+        f"📝 درخواست شهروندی شما با موفقیت ثبت و تایید شد.\n\n🪪 کد ملی شما: `{national_id}`",
         parse_mode='Markdown'
     )
     
-    links = [
-        get_config('group_link_1') or 'https://t.me/YourGroup1',
-        get_config('group_link_2') or 'https://t.me/YourGroup2',
-        get_config('group_link_3') or 'https://t.me/YourGroup3',
-        get_config('group_link_4') or 'https://t.me/YourGroup4'
-    ]
-    keyboard = [
-        [InlineKeyboardButton(f"🏰 گروه {i+1}", url=link)] for i, link in enumerate(links)
-    ]
+    links = [get_config(f'group_link_{i}') or f'https://t.me/Group{i}' for i in range(1,5)]
+    keyboard = [[InlineKeyboardButton(f"🏰 گروه {i+1}", url=link)] for i, link in enumerate(links)]
     await query.message.reply_text(
-        "خوش آمدید! با استفاده از دکمه‌های زیر، وارد سرزمین شوید.\n\n"
-        "به امید موفقیت شما ✨🏰",
+        "خوش آمدید! با استفاده از دکمه‌های زیر، وارد سرزمین شوید.\n\nبه امید موفقیت شما ✨🏰",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     context.user_data.clear()
@@ -454,16 +421,13 @@ async def balance_callback(update: Update, context):
     user_id = update.effective_user.id
     user = get_user_by_telegram_id(user_id)
     if not user:
-        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید. لطفاً /start کنید.")
+        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
         return
-    if not is_bot_online() and user_id != OWNER_ID:
+    if not is_bot_online(user_id):
         await query.edit_message_text("⛔ ربات در حال حاضر خاموش است.")
         return
-    # در این ربات موجودی معنی ندارد، ولی برای نمایش پیام دوستانه:
     await query.edit_message_text(
-        f"💰 **موجودی شما در بانک کملوت**\n\n"
-        f"شما به عنوان شهروند کملوت، هیچ موجودی بانکی ندارید، اما اعتبار شما نزد پادشاهی محفوظ است! ⚔️\n"
-        f"برای اطلاعات بیشتر به پنل اصلی بروید.",
+        f"💰 **موجودی شما**:\nشما به عنوان شهروند کملوت، اعتبار نزد پادشاهی محفوظ است! ⚔️",
         reply_markup=main_menu_keyboard(user_id),
         parse_mode='Markdown'
     )
@@ -474,12 +438,11 @@ async def my_info_callback(update: Update, context):
     user_id = update.effective_user.id
     user = get_user_by_telegram_id(user_id)
     if not user:
-        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید. لطفاً /start کنید.")
+        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
         return
-    if not is_bot_online() and user_id != OWNER_ID:
+    if not is_bot_online(user_id):
         await query.edit_message_text("⛔ ربات در حال حاضر خاموش است.")
         return
-    
     info_text = f"""👤 **اطلاعات شما**
 ━━━━━━━━━━━━━━━━━━━
 📛 نام واقعی: {user['real_name']}
@@ -488,7 +451,7 @@ async def my_info_callback(update: Update, context):
 🗡️ نام کملوتی: {user['camelot_name']}
 🆔 کد ملی: {user['national_id']}
 👑 نقش: {get_role_display(user['role'])}
-📅 تاریخ ثبت‌نام: {user['register_date_shamsi']} - {user['register_time']}
+📅 تاریخ ثبت: {user['register_date_shamsi']} - {user['register_time']}
 ━━━━━━━━━━━━━━━━━━━
 """
     await query.edit_message_text(info_text, reply_markup=main_menu_keyboard(user_id), parse_mode='Markdown')
@@ -496,28 +459,26 @@ async def my_info_callback(update: Update, context):
 async def notifications_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "📬 **صندوق پیام شما خالی است.**\n\n"
-        "هیچ اعلانی برای شما وجود ندارد.",
-        reply_markup=main_menu_keyboard(update.effective_user.id),
-        parse_mode='Markdown'
-    )
+    user_id = update.effective_user.id
+    if not is_bot_online(user_id):
+        await query.edit_message_text("⛔ ربات در حال حاضر خاموش است.")
+        return
+    await query.edit_message_text("📬 **صندوق پیام شما خالی است.**", reply_markup=main_menu_keyboard(user_id))
 
 async def support_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    user = get_user_by_telegram_id(user_id)
-    if not user:
-        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید. لطفاً /start کنید.")
+    if not is_bot_online(user_id):
+        await query.edit_message_text("⛔ ربات در حال حاضر خاموش است.")
         return
-    await query.edit_message_text(
-        "🆘 **پشتیبانی کملوت**\n\n"
-        "لطفاً پیام خود را به صورت یک پیام متنی ارسال کنید.\n"
-        "مدیریت در اسرع وقت پاسخ خواهد داد.",
-        reply_markup=main_menu_keyboard(user_id),
-        parse_mode='Markdown'
-    )
+    await query.edit_message_text("🆘 **پشتیبانی کملوت**\nلطفاً پیام خود را ارسال کنید.", reply_markup=main_menu_keyboard(user_id))
+
+async def back_to_menu(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    await query.edit_message_text("🏰 منوی اصلی کملوت", reply_markup=main_menu_keyboard(user_id))
 
 # ==================== پنل مدیریت (فقط مالک) ====================
 async def panel_callback(update: Update, context):
@@ -527,14 +488,11 @@ async def panel_callback(update: Update, context):
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    if not is_bot_online():
-        await query.edit_message_text("⛔ ربات در حال حاضر خاموش است.")
-        return
-    
+    # ✅ برای مالک، حتی اگر ربات خاموش باشه، پنل نمایش داده میشه
     keyboard = [
         [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
         [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
-        [InlineKeyboardButton("📋 لیست همه اعضا", callback_data="admin_users")],  # همان مدیریت کاربران
+        [InlineKeyboardButton("📋 لیست همه اعضا", callback_data="admin_users")],
         [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
         [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
         [InlineKeyboardButton("🔴 خاموش/روشن کردن ربات", callback_data="admin_toggle_bot")],
@@ -555,7 +513,7 @@ async def admin_toggle_bot(update: Update, context):
         return
     current = get_config('bot_status')
     new_status = 'off' if current != 'off' else 'on'
-    set_bot_status(new_status)
+    set_config('bot_status', new_status)
     status_text = "خاموش" if new_status == 'off' else "روشن"
     add_system_log('admin_action', f'ربات {status_text} شد', f'توسط: مالک', actor_id=user_id)
     await query.edit_message_text(
@@ -564,18 +522,9 @@ async def admin_toggle_bot(update: Update, context):
         parse_mode='Markdown'
     )
 
-async def back_to_menu(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    await query.edit_message_text(
-        "🏰 منوی اصلی کملوت",
-        reply_markup=main_menu_keyboard(user_id),
-        parse_mode='Markdown'
-    )
-
-# ==================== مدیریت کاربران (لیست و ویرایش) ====================
+# ==================== مدیریت کاربران ====================
 USERS_PER_PAGE = 10
+LOGS_PER_PAGE = 10
 ADMIN_EDIT_STATE = 200
 ADMIN_BROADCAST_STATE = 300
 ADMIN_LOGS_PAGE = 400
@@ -776,17 +725,11 @@ async def admin_edit_value(update: Update, context):
         if len(text) != 6 or not text.isdigit():
             await update.message.reply_text("❌ کد ملی باید ۶ رقم باشد. دوباره وارد کنید:")
             return ADMIN_EDIT_STATE
-        # بررسی تکراری نبودن
         existing = get_user_by_national_id(text)
         if existing and existing['telegram_id'] != target:
             await update.message.reply_text("❌ این کد ملی قبلاً به کاربر دیگری تعلق دارد. لطفاً کد دیگری وارد کنید:")
             return ADMIN_EDIT_STATE
-        # کد ملی قبلی را آزاد می‌کنیم (با NULL کردن آن) سپس کد جدید را تنظیم می‌کنیم
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE citizens SET national_id = ? WHERE telegram_id = ?", (text, target))
-        conn.commit()
-        conn.close()
+        update_user_field(target, 'national_id', text)
         add_system_log('admin_action', f'تغییر کد ملی کاربر {old_user["camelot_name"]}', f'کد جدید: {text}', actor_id=user_id, target_id=target)
         await update.message.reply_text(f"✅ کد ملی با موفقیت به `{text}` تغییر یافت.", parse_mode='Markdown')
     
@@ -808,7 +751,6 @@ async def admin_change_role(update: Update, context, target_telegram_id):
         await query.edit_message_text("❌ کاربر یافت نشد.")
         return
     
-    # چرخش نقش: شهروند -> کارمند -> شاه -> شهروند
     roles = ['شهروند', 'کارمند', 'شاه']
     current = user['role']
     try:
@@ -937,8 +879,6 @@ async def admin_broadcast_receive(update: Update, context):
     return ConversationHandler.END
 
 # ==================== لاگ‌های سیستم ====================
-LOGS_PER_PAGE = 10
-
 async def admin_logs_list(update: Update, context, page=0):
     query = update.callback_query
     await query.answer()
@@ -1073,12 +1013,10 @@ async def admin_backup_import_file(update: Update, context):
     return ConversationHandler.END
 
 # ==================== main ====================
-import asyncio
-
 def main():
     init_db()
     if get_config('bot_status') is None:
-        set_bot_status('on')
+        set_config('bot_status', 'on')
     
     app = Application.builder().token(BOT_TOKEN).build()
     
