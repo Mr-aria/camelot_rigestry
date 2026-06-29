@@ -218,14 +218,19 @@ def get_system_logs(limit=50, offset=0):
     conn.close()
     return logs, total
 
-def add_notification(user_id, title, message):
+# اصلاح: تابع add_notification با telegram_id کار می‌کند
+def add_notification(telegram_id, title, message):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO notifications (user_id, title, message)
-        VALUES (?, ?, ?)
-    ''', (user_id, title, message))
-    conn.commit()
+    # پیدا کردن user_id از روی telegram_id
+    cursor.execute("SELECT id FROM citizens WHERE telegram_id = ?", (telegram_id,))
+    user = cursor.fetchone()
+    if user:
+        cursor.execute('''
+            INSERT INTO notifications (user_id, title, message)
+            VALUES (?, ?, ?)
+        ''', (user['id'], title, message))
+        conn.commit()
     conn.close()
 
 def get_notifications(user_id, limit=20):
@@ -357,14 +362,13 @@ def is_bot_online(user_id=None):
         return True
     return status != 'off'
 
-# ==================== منوی اصلی ====================
+# ==================== منوی اصلی (بدون دکمه شغل) ====================
 def main_menu_keyboard(user_id):
     if not is_bot_online(user_id):
         return None
     keyboard = [
         [InlineKeyboardButton("👤 اطلاعات من", callback_data="my_info")],
         [InlineKeyboardButton("📬 صندوق پیام", callback_data="notifications")],
-        [InlineKeyboardButton("💼 شغل", callback_data="job")],
         [InlineKeyboardButton("🏦 شماره حساب", callback_data="bank_account")],
     ]
     if user_id == OWNER_ID:
@@ -627,32 +631,6 @@ async def notifications_callback(update: Update, context):
     keyboard = [[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
-async def job_callback(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    user = get_user_by_telegram_id(user_id)
-    if not user:
-        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
-        return
-    if not is_bot_online(user_id):
-        await query.edit_message_text("⛔ ربات در حال حاضر خاموش است.")
-        return
-    if user['job']:
-        await query.edit_message_text(
-            f"💼 **شغل فعلی شما:** {user['job']}\n\n"
-            f"برای تغییر شغل، با کارمند اداره کار تماس بگیرید.",
-            reply_markup=main_menu_keyboard(user_id),
-            parse_mode='Markdown'
-        )
-    else:
-        await query.edit_message_text(
-            "💼 **شغل شما ثبت نشده است.**\n\n"
-            "برای ثبت شغل، با کارمند اداره کار تماس بگیرید.",
-            reply_markup=main_menu_keyboard(user_id),
-            parse_mode='Markdown'
-        )
-
 async def bank_account_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -719,7 +697,7 @@ async def bank_password_receive(update: Update, context):
     
     req_id = add_bank_request(user['id'], user['national_id'], bank_account, text)
     add_system_log('bank_request', f'درخواست شماره حساب از {user["camelot_name"]}', f'شماره حساب: {bank_account}', actor_id=user_id)
-    add_notification(user['id'], 'درخواست شماره حساب', f'درخواست شما با شماره پیگیری {req_id} ثبت شد. منتظر تایید کارمند بانک باشید.')
+    add_notification(user_id, 'درخواست شماره حساب', f'درخواست شما با شماره پیگیری {req_id} ثبت شد. منتظر تایید کارمند بانک باشید.')
     
     await update.message.reply_text(
         f"✅ **درخواست شما ثبت شد.**\n\n"
@@ -752,6 +730,8 @@ async def panel_callback(update: Update, context):
     if role == 'مالک':
         keyboard = [
             [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
+            [InlineKeyboardButton("🏦 صندوق مدیریت بانکی", callback_data="admin_bank_requests")],
+            [InlineKeyboardButton("💼 ثبت شغل برای کاربر", callback_data="admin_job")],
             [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
             [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
             [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
@@ -1738,7 +1718,6 @@ def main():
     
     app.add_handler(CallbackQueryHandler(my_info_callback, pattern='^my_info$'))
     app.add_handler(CallbackQueryHandler(notifications_callback, pattern='^notifications$'))
-    app.add_handler(CallbackQueryHandler(job_callback, pattern='^job$'))
     
     # تغییر نقش به صورت انتخابی
     app.add_handler(CallbackQueryHandler(lambda u,c: admin_change_role(u,c, int(u.callback_query.data.split('_')[3])), pattern='^admin_change_role_'))
