@@ -570,7 +570,7 @@ async def back_to_menu(update: Update, context):
     user_id = update.effective_user.id
     await query.edit_message_text("🏰 منوی اصلی کملوت", reply_markup=main_menu_keyboard(user_id))
 
-# ==================== پنل مدیریت (با دسترسی‌های کارمند) ====================
+# ==================== پنل مدیریت (نسخه جدید) ====================
 async def panel_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -580,31 +580,22 @@ async def panel_callback(update: Update, context):
         await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
         return
     
-    role = user['role']
-    
-    if role == 'مالک':
-        keyboard = [
-            [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
-            [InlineKeyboardButton("📜 تغییر قوانین", callback_data="admin_edit_rules")],
-            [InlineKeyboardButton("💬 تغییر پیام خوش‌آمد", callback_data="admin_edit_welcome")],
-            [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
-            [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
-            [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
-            [InlineKeyboardButton("🔴 خاموش/روشن کردن ربات", callback_data="admin_toggle_bot")],
-            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
-        ]
-    elif role == 'کارمند':
-        keyboard = [
-            [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
-            [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
-            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
-        ]
-    else:
+    if user['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.", reply_markup=main_menu_keyboard(user_id))
         return
     
+    keyboard = [
+        [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
+        [InlineKeyboardButton("📜 تغییر قوانین", callback_data="admin_edit_rules")],
+        [InlineKeyboardButton("💬 تغییر پیام خوش‌آمد", callback_data="admin_edit_welcome")],
+        [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
+        [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
+        [InlineKeyboardButton("🔴 خاموش/روشن کردن ربات", callback_data="admin_toggle_bot")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
+    ]
     await query.edit_message_text(
-        f"👑 **پنل مدیریت**\n👤 نقش: {get_role_display(role)}\n🕐 {get_jalali_date()}",
+        f"👑 **پنل مدیریت (مالک)**\n🕐 {get_jalali_date()}",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
@@ -698,7 +689,7 @@ async def admin_toggle_bot(update: Update, context):
         parse_mode='Markdown'
     )
 
-# ==================== مدیریت کاربران (با محدودیت کارمند) ====================
+# ==================== مدیریت کاربران (نسخه جدید) ====================
 USERS_PER_PAGE = 10
 LOGS_PER_PAGE = 10
 ADMIN_EDIT_STATE = 200
@@ -710,13 +701,7 @@ async def admin_users_list(update: Update, context, page=0):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    actor = get_user_by_telegram_id(user_id)
-    if not actor:
-        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
-        return
-    
-    # فقط مالک و کارمند دسترسی دارند
-    if actor['role'] not in ['مالک', 'کارمند']:
+    if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     
@@ -736,22 +721,15 @@ async def admin_users_list(update: Update, context, page=0):
     text = f"👥 **لیست شهروندان کملوت**\n━━━━━━━━━━━━━━━━━━━\n"
     text += f"تعداد کل: {total} | صفحه {page+1}\n━━━━━━━━━━━━━━━━━━━\n\n"
     
-    is_employee = (actor['role'] == 'کارمند')
-    
     for idx, u in enumerate(users_page, start=offset+1):
         reversed_num = total - (offset + idx) + 1
         text += f"**{reversed_num}. {u['real_name']}** ({u['camelot_name']})\n"
         text += f"🆔 کدملی: {u['national_id']}\n"
         text += f"🎂 سن: {u['age'] if u['age'] else 'ثبت نشده'}\n"
-        if is_employee:
-            # کارمند فقط این موارد رو می‌بینه
-            text += f"⚧️ جنسیت: {u['gender']}\n"
-        else:
-            # مالک همه اطلاعات
-            text += f"👑 نقش: {get_role_display(u['role'])}\n"
-            text += f"📱 آیدی: {u['telegram_id']}\n"
-            text += f"📱 یوزرنیم: @{u['telegram_username'] or 'ندارد'}\n"
-            text += f"📅 ثبت: {u['register_date_shamsi']} - {u['register_time']}\n"
+        text += f"👑 نقش: {get_role_display(u['role'])}\n"
+        text += f"📱 آیدی: {u['telegram_id']}\n"
+        text += f"📱 یوزرنیم: @{u['telegram_username'] or 'ندارد'}\n"
+        text += f"📅 ثبت: {u['register_date_shamsi']} - {u['register_time']}\n"
         text += f"━━━━━━━━━━━━━━━━━━━\n"
     
     keyboard = []
@@ -773,12 +751,12 @@ async def admin_users_page_handler(update: Update, context):
     page = int(query.data.split('_')[3])
     await admin_users_list(update, context, page)
 
+# ==================== مدیریت کاربر با آیدی (نسخه جدید) ====================
 async def admin_manage_user_start(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    actor = get_user_by_telegram_id(user_id)
-    if not actor or actor['role'] not in ['مالک', 'کارمند']:
+    if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     await query.edit_message_text(
@@ -792,8 +770,7 @@ async def admin_manage_user_start(update: Update, context):
 async def admin_manage_user_receive(update: Update, context):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    actor = get_user_by_telegram_id(user_id)
-    if not actor or actor['role'] not in ['مالک', 'کارمند']:
+    if user_id != OWNER_ID:
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     if text.lower() == '/cancel':
@@ -811,8 +788,6 @@ async def admin_manage_user_receive(update: Update, context):
     
     context.user_data['manage_target'] = target_telegram_id
     
-    is_employee = (actor['role'] == 'کارمند')
-    
     info_text = f"""👤 **اطلاعات کاربر**
 ━━━━━━━━━━━━━━━━━━━
 📛 **نام واقعی:** {target_user['real_name']}
@@ -820,33 +795,23 @@ async def admin_manage_user_receive(update: Update, context):
 🎂 **سن:** {target_user['age'] if target_user['age'] else 'ثبت نشده'}
 🗡️ **نام کملوتی:** {target_user['camelot_name']}
 🆔 **کد ملی:** {target_user['national_id']}
+👑 **نقش:** {get_role_display(target_user['role'])}
+📱 **آیدی تلگرام:** {target_user['telegram_id']}
+📱 **یوزرنیم:** @{target_user['telegram_username'] or 'ندارد'}
+📅 **تاریخ ثبت:** {target_user['register_date_shamsi']} - {target_user['register_time']}
+━━━━━━━━━━━━━━━━━━━
 """
-    if not is_employee:
-        # مالک اطلاعات کامل رو می‌بینه
-        info_text += f"👑 **نقش:** {get_role_display(target_user['role'])}\n"
-        info_text += f"📱 **آیدی تلگرام:** {target_user['telegram_id']}\n"
-        info_text += f"📱 **یوزرنیم:** @{target_user['telegram_username'] or 'ندارد'}\n"
-        info_text += f"📅 **تاریخ ثبت:** {target_user['register_date_shamsi']} - {target_user['register_time']}\n"
-    info_text += "━━━━━━━━━━━━━━━━━━━\n"
-    
-    keyboard = []
-    if is_employee:
-        # کارمند فقط دکمه گزارش دارد
-        keyboard.append([InlineKeyboardButton("📨 گزارش به مدیریت", callback_data=f"admin_report_{target_telegram_id}")])
-    else:
-        # مالک همه دکمه‌ها
-        keyboard = [
-            [InlineKeyboardButton("✏️ تغییر نام واقعی", callback_data=f"admin_edit_realname_{target_telegram_id}")],
-            [InlineKeyboardButton("✏️ تغییر نام کملوتی", callback_data=f"admin_edit_camelot_{target_telegram_id}")],
-            [InlineKeyboardButton("✏️ تغییر سن", callback_data=f"admin_edit_age_{target_telegram_id}")],
-            [InlineKeyboardButton("✏️ تغییر یوزرنیم", callback_data=f"admin_edit_username_{target_telegram_id}")],
-            [InlineKeyboardButton("✏️ تغییر کد ملی", callback_data=f"admin_edit_national_{target_telegram_id}")],
-            [InlineKeyboardButton("👑 تغییر نقش", callback_data=f"admin_change_role_{target_telegram_id}")],
-            [InlineKeyboardButton("🚫 اخراج شهروند", callback_data=f"admin_exile_{target_telegram_id}")],
-            [InlineKeyboardButton("📨 گزارش به مدیریت", callback_data=f"admin_report_{target_telegram_id}")],
-        ]
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت به لیست", callback_data="admin_users")])
-    
+    keyboard = [
+        [InlineKeyboardButton("✏️ تغییر نام واقعی", callback_data=f"admin_edit_realname_{target_telegram_id}")],
+        [InlineKeyboardButton("✏️ تغییر نام کملوتی", callback_data=f"admin_edit_camelot_{target_telegram_id}")],
+        [InlineKeyboardButton("✏️ تغییر سن", callback_data=f"admin_edit_age_{target_telegram_id}")],
+        [InlineKeyboardButton("✏️ تغییر یوزرنیم", callback_data=f"admin_edit_username_{target_telegram_id}")],
+        [InlineKeyboardButton("✏️ تغییر کد ملی", callback_data=f"admin_edit_national_{target_telegram_id}")],
+        [InlineKeyboardButton("👑 تغییر نقش", callback_data=f"admin_change_role_{target_telegram_id}")],
+        [InlineKeyboardButton("🚫 اخراج شهروند", callback_data=f"admin_exile_{target_telegram_id}")],
+        [InlineKeyboardButton("📨 گزارش به مدیریت", callback_data=f"admin_report_{target_telegram_id}")],
+        [InlineKeyboardButton("🔙 بازگشت به لیست", callback_data="admin_users")],
+    ]
     await update.message.reply_text(info_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     return ConversationHandler.END
 
@@ -1382,7 +1347,7 @@ def main():
     )
     app.add_handler(edit_welcome_conv)
     
-    # مدیریت کاربر با آیدی (مالک و کارمند)
+    # مدیریت کاربر با آیدی (مالک)
     manage_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_manage_user_start, pattern='^admin_manage_user$')],
         states={ADMIN_USER_MANAGE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_manage_user_receive)]},
