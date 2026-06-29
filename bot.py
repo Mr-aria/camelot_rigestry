@@ -749,7 +749,6 @@ async def panel_callback(update: Update, context):
     
     role = user['role']
     
-    # مالک: همه چیز
     if role == 'مالک':
         keyboard = [
             [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
@@ -766,7 +765,6 @@ async def panel_callback(update: Update, context):
         )
         return
     
-    # کارمند بانک: فقط صندوق بانکی
     elif role == 'کارمند بانک':
         keyboard = [
             [InlineKeyboardButton("🏦 صندوق مدیریت بانکی", callback_data="admin_bank_requests")],
@@ -779,7 +777,6 @@ async def panel_callback(update: Update, context):
         )
         return
     
-    # کارمند اداره کار: فقط ثبت شغل (با کد ملی)
     elif role == 'کارمند اداره کار':
         keyboard = [
             [InlineKeyboardButton("💼 ثبت شغل برای کاربر", callback_data="admin_job")],
@@ -792,11 +789,29 @@ async def panel_callback(update: Update, context):
         )
         return
     
-    # شاه یا کارمند عادی: دسترسی ندارند به پنل
     else:
         await query.edit_message_text("⛔ شما دسترسی به پنل مدیریت ندارید.", reply_markup=main_menu_keyboard(user_id))
 
-# ==================== صندوق مدیریت بانکی (برای کارمند بانک) ====================
+# ==================== خاموش/روشن کردن ربات ====================
+async def admin_toggle_bot(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    current = get_config('bot_status')
+    new_status = 'off' if current != 'off' else 'on'
+    set_config('bot_status', new_status)
+    status_text = "خاموش" if new_status == 'off' else "روشن"
+    add_system_log('admin_action', f'ربات {status_text} شد', f'توسط: مالک', actor_id=user_id)
+    await query.edit_message_text(
+        f"✅ ربات با موفقیت {status_text} شد.\nوضعیت فعلی: {'🔴 خاموش' if new_status == 'off' else '🟢 روشن'}",
+        reply_markup=main_menu_keyboard(user_id),
+        parse_mode='Markdown'
+    )
+
+# ==================== صندوق مدیریت بانکی ====================
 async def admin_bank_requests(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -814,23 +829,21 @@ async def admin_bank_requests(update: Update, context):
         )
         return
     
-    text = "🏦 **درخواست‌های شماره حساب (در انتظار تایید)**\n━━━━━━━━━━━━━━━━━━━\n\n"
     for req in reqs:
         req_user = get_user_by_telegram_id(req['user_id'])
         if req_user:
-            text += f"🆔 {req['id']}. {req_user['camelot_name']} (کدملی: {req['national_id']})\n"
+            text = f"🏦 **درخواست #{req['id']}**\n"
+            text += f"👤 {req_user['camelot_name']} (کدملی: {req['national_id']})\n"
             text += f"🏦 شماره حساب: {req['bank_account']}\n"
             text += f"🔐 رمز: {req['password']}\n"
             text += f"🕐 {jdatetime.datetime.fromgregorian(datetime=datetime.strptime(req['created_at'], '%Y-%m-%d %H:%M:%S')).strftime('%Y/%m/%d - %H:%M')}\n"
-            text += f"━━━━━━━━━━━━━━━━━━━\n"
             keyboard = [
-                [InlineKeyboardButton(f"✅ تایید #{req['id']}", callback_data=f"bank_approve_{req['id']}")],
-                [InlineKeyboardButton(f"❌ رد #{req['id']}", callback_data=f"bank_reject_{req['id']}")],
+                [InlineKeyboardButton("✅ تایید", callback_data=f"bank_approve_{req['id']}")],
+                [InlineKeyboardButton("❌ رد", callback_data=f"bank_reject_{req['id']}")],
             ]
             await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-            text = ""
     
-    await query.edit_message_text("برای تایید یا رد، روی دکمه‌های مربوطه کلیک کنید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]]))
+    await query.delete_message()
 
 async def admin_bank_approve(update: Update, context):
     query = update.callback_query
@@ -848,12 +861,11 @@ async def admin_bank_approve(update: Update, context):
         await query.edit_message_text("❌ این درخواست قبلاً پردازش شده است.")
         return
     
-    # تایید: شماره حساب رو توی دیتابیس ثبت کن
     update_user_field(req['user_id'], 'bank_account', req['bank_account'])
     update_bank_request(req_id, 'approved')
     add_system_log('bank_request', f'تایید شماره حساب برای کاربر {req["user_id"]}', f'شماره حساب: {req["bank_account"]}', actor_id=user_id, target_id=req['user_id'])
     add_notification(req['user_id'], 'تایید شماره حساب', f'شماره حساب {req["bank_account"]} شما با موفقیت تایید شد.')
-    await query.edit_message_text(f"✅ درخواست #{req_id} تایید شد. شماره حساب ثبت شد.")
+    await query.edit_message_text(f"✅ درخواست #{req_id} تایید شد.")
 
 async def admin_bank_reject(update: Update, context):
     query = update.callback_query
@@ -877,7 +889,7 @@ async def admin_bank_reject(update: Update, context):
         parse_mode='Markdown'
     )
     context.user_data['reject_req_id'] = req_id
-    return BANK_PASSWORD_STATE  # reuse state
+    return BANK_PASSWORD_STATE
 
 async def bank_reject_reason(update: Update, context):
     text = update.message.text.strip()
@@ -1230,13 +1242,12 @@ async def admin_change_role(update: Update, context, target_telegram_id):
         await query.edit_message_text("❌ کاربر یافت نشد.")
         return
     
-    # لیست نقش‌های موجود
     roles = ['شهروند', 'کارمند', 'کارمند بانک', 'کارمند اداره کار', 'شاه']
     keyboard = []
     for role in roles:
-        if role != target_user['role']:  # نقش فعلی رو نشون نده
+        if role != target_user['role']:
             keyboard.append([InlineKeyboardButton(f"👑 {role}", callback_data=f"admin_set_role_{target_telegram_id}_{role}")])
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"admin_manage_user")])
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_users")])
     
     await query.edit_message_text(
         f"👤 **کاربر:** {target_user['real_name']} ({target_user['camelot_name']})\n"
@@ -1609,6 +1620,7 @@ def main():
             WAITING_RULES_ACCEPT: [CallbackQueryHandler(rules_callback, pattern='^(rules_accept|rules_cancel)$')],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(reg_conv)
     
@@ -1619,6 +1631,7 @@ def main():
             RESTORE_BACKUP_STATE: [MessageHandler(filters.Document.ALL, restore_backup_file)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(restore_conv)
     
@@ -1630,6 +1643,7 @@ def main():
             BANK_PASSWORD_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bank_password_receive)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(bank_conv)
     
@@ -1640,6 +1654,7 @@ def main():
             ADMIN_USER_MANAGE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_manage_user_receive)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(manage_conv)
     
@@ -1656,6 +1671,7 @@ def main():
             ADMIN_EDIT_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_value)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(edit_conv)
     
@@ -1666,6 +1682,7 @@ def main():
             REPORT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_report_reason)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(report_conv)
     
@@ -1677,6 +1694,7 @@ def main():
             JOB_REQUEST_STATE + 1: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_job_set)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(job_conv)
     
@@ -1690,6 +1708,7 @@ def main():
             BANK_PASSWORD_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bank_reject_reason)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(reject_conv)
     
@@ -1700,6 +1719,7 @@ def main():
             ADMIN_BROADCAST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_receive)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(broadcast_conv)
     
@@ -1710,6 +1730,7 @@ def main():
             ADMIN_BACKUP_STATE: [MessageHandler(filters.Document.ALL, admin_backup_import_file)],
         },
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+        per_message=True
     )
     app.add_handler(backup_import_conv)
     
@@ -1721,7 +1742,7 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_logs_page_handler, pattern='^admin_logs_page_'))
     app.add_handler(CallbackQueryHandler(admin_backup_menu, pattern='^admin_backup$'))
     app.add_handler(CallbackQueryHandler(admin_backup_export, pattern='^admin_backup_export$'))
-    app.add_handler(CallbackQueryHandler(admin_toggle_bot, pattern='^admin_toggle_bot$'))
+    app.add_handler(CallbackQueryHandler(admin_toggle_bot, pattern='^admin_toggle_bot$'))  # رفع تایپو
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'))
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_panel$'))
     
