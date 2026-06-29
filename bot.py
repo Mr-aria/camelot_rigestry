@@ -218,11 +218,9 @@ def get_system_logs(limit=50, offset=0):
     conn.close()
     return logs, total
 
-# اصلاح: تابع add_notification با telegram_id کار می‌کند
 def add_notification(telegram_id, title, message):
     conn = get_db_connection()
     cursor = conn.cursor()
-    # پیدا کردن user_id از روی telegram_id
     cursor.execute("SELECT id FROM citizens WHERE telegram_id = ?", (telegram_id,))
     user = cursor.fetchone()
     if user:
@@ -362,7 +360,7 @@ def is_bot_online(user_id=None):
         return True
     return status != 'off'
 
-# ==================== منوی اصلی (بدون دکمه شغل) ====================
+# ==================== منوی اصلی ====================
 def main_menu_keyboard(user_id):
     if not is_bot_online(user_id):
         return None
@@ -809,21 +807,26 @@ async def admin_bank_requests(update: Update, context):
         )
         return
     
+    text = "🏦 **لیست درخواست‌های شماره حساب (در انتظار تایید)**\n━━━━━━━━━━━━━━━━━━━\n\n"
     for req in reqs:
         req_user = get_user_by_telegram_id(req['user_id'])
         if req_user:
-            text = f"🏦 **درخواست #{req['id']}**\n"
+            text += f"🆔 #{req['id']}\n"
             text += f"👤 {req_user['camelot_name']} (کدملی: {req['national_id']})\n"
             text += f"🏦 شماره حساب: {req['bank_account']}\n"
             text += f"🔐 رمز: {req['password']}\n"
             text += f"🕐 {jdatetime.datetime.fromgregorian(datetime=datetime.strptime(req['created_at'], '%Y-%m-%d %H:%M:%S')).strftime('%Y/%m/%d - %H:%M')}\n"
-            keyboard = [
-                [InlineKeyboardButton("✅ تایید", callback_data=f"bank_approve_{req['id']}")],
-                [InlineKeyboardButton("❌ رد", callback_data=f"bank_reject_{req['id']}")],
-            ]
-            await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            text += f"━━━━━━━━━━━━━━━━━━━\n"
     
-    await query.delete_message()
+    keyboard = []
+    for req in reqs:
+        keyboard.append([
+            InlineKeyboardButton(f"✅ تایید #{req['id']}", callback_data=f"bank_approve_{req['id']}"),
+            InlineKeyboardButton(f"❌ رد #{req['id']}", callback_data=f"bank_reject_{req['id']}")
+        ])
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel")])
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def admin_bank_approve(update: Update, context):
     query = update.callback_query
