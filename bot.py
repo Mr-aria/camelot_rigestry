@@ -42,8 +42,6 @@ def init_db():
             camelot_name TEXT,
             national_id TEXT UNIQUE,
             role TEXT DEFAULT 'شهروند',
-            job TEXT DEFAULT NULL,
-            bank_account TEXT DEFAULT NULL,
             register_date_shamsi TEXT,
             register_time TEXT
         )
@@ -75,19 +73,6 @@ def init_db():
             title TEXT,
             message TEXT,
             is_read INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS bank_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            national_id TEXT,
-            bank_account TEXT,
-            password TEXT,
-            status TEXT DEFAULT 'pending',
-            reason TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -168,13 +153,13 @@ def save_citizen(data):
     cursor.execute('''
         INSERT INTO citizens (
             telegram_id, telegram_username, telegram_first_name, real_name,
-            gender, age, camelot_name, national_id, role, job, bank_account,
+            gender, age, camelot_name, national_id, role,
             register_date_shamsi, register_time
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         data['telegram_id'], data['telegram_username'], data['telegram_first_name'],
         data['real_name'], data['gender'], data['age'], data['camelot_name'],
-        national_id, role, None, None, now_shamsi, now_time
+        national_id, role, now_shamsi, now_time
     ))
     conn.commit()
     conn.close()
@@ -251,38 +236,6 @@ def mark_notification_read(notif_id):
     conn.commit()
     conn.close()
 
-def add_bank_request(user_id, national_id, bank_account, password):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO bank_requests (user_id, national_id, bank_account, password)
-        VALUES (?, ?, ?, ?)
-    ''', (user_id, national_id, bank_account, password))
-    req_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return req_id
-
-def get_bank_requests(status='pending'):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT * FROM bank_requests WHERE status = ? ORDER BY created_at DESC
-    ''', (status,))
-    reqs = cursor.fetchall()
-    conn.close()
-    return reqs
-
-def update_bank_request(req_id, status, reason=None):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    if reason:
-        cursor.execute("UPDATE bank_requests SET status = ?, reason = ? WHERE id = ?", (status, reason, req_id))
-    else:
-        cursor.execute("UPDATE bank_requests SET status = ? WHERE id = ?", (status, req_id))
-    conn.commit()
-    conn.close()
-
 def export_full_backup():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -291,7 +244,7 @@ def export_full_backup():
         'created_at': dt.now(TEHRAN_TZ).isoformat(),
         'tables': {}
     }
-    for table in ['citizens', 'system_logs', 'config', 'notifications', 'bank_requests']:
+    for table in ['citizens', 'system_logs', 'config', 'notifications']:
         cursor.execute(f"SELECT * FROM {table}")
         rows = cursor.fetchall()
         table_data = []
@@ -315,7 +268,7 @@ def import_full_backup(json_data):
     
     conn = get_db_connection()
     cursor = conn.cursor()
-    for table in ['citizens', 'system_logs', 'config', 'notifications', 'bank_requests']:
+    for table in ['citizens', 'system_logs', 'config', 'notifications']:
         cursor.execute(f"DELETE FROM {table}")
     for table, rows in backup_data['tables'].items():
         if rows:
@@ -338,20 +291,8 @@ def get_jalali_date():
     jnow = jdatetime.datetime.fromgregorian(datetime=now)
     return jnow.strftime("%Y/%m/%d - %H:%M")
 
-def get_jalali_date_only():
-    now = datetime.now(TEHRAN_TZ)
-    jnow = jdatetime.datetime.fromgregorian(datetime=now)
-    return jnow.strftime("%Y/%m/%d")
-
 def get_role_display(role):
-    roles = {
-        'شهروند':'شهروند',
-        'کارمند':'کارمند',
-        'کارمند بانک':'کارمند بانک',
-        'کارمند اداره کار':'کارمند اداره کار',
-        'شاه':'شاه',
-        'مالک':'مالک'
-    }
+    roles = {'شهروند':'شهروند', 'کارمند':'کارمند', 'شاه':'شاه', 'مالک':'مالک'}
     return roles.get(role, 'شهروند')
 
 def is_bot_online(user_id=None):
@@ -367,7 +308,6 @@ def main_menu_keyboard(user_id):
     keyboard = [
         [InlineKeyboardButton("👤 اطلاعات من", callback_data="my_info")],
         [InlineKeyboardButton("📬 صندوق پیام", callback_data="notifications")],
-        [InlineKeyboardButton("🏦 شماره حساب", callback_data="bank_account")],
     ]
     if user_id == OWNER_ID:
         keyboard.append([InlineKeyboardButton("👑 پنل مدیریت", callback_data="panel")])
@@ -379,9 +319,6 @@ def main_menu_keyboard(user_id):
 
 RESTORE_BACKUP_STATE = 800
 REPORT_REASON = 700
-BANK_ACCOUNT_STATE = 900
-BANK_PASSWORD_STATE = 901
-JOB_REQUEST_STATE = 1000
 
 async def start(update: Update, context):
     user_id = update.effective_user.id
@@ -593,8 +530,6 @@ async def my_info_callback(update: Update, context):
 🗡️ نام کملوتی: {user['camelot_name']}
 🆔 کد ملی: {user['national_id']}
 👑 نقش: {get_role_display(user['role'])}
-💼 شغل: {user['job'] if user['job'] else 'ثبت نشده'}
-🏦 شماره حساب: {user['bank_account'] if user['bank_account'] else 'ثبت نشده'}
 📅 تاریخ ثبت: {user['register_date_shamsi']} - {user['register_time']}
 ━━━━━━━━━━━━━━━━━━━
 """
@@ -629,84 +564,6 @@ async def notifications_callback(update: Update, context):
     keyboard = [[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
-async def bank_account_callback(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    user = get_user_by_telegram_id(user_id)
-    if not user:
-        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
-        return
-    if not is_bot_online(user_id):
-        await query.edit_message_text("⛔ ربات در حال حاضر خاموش است.")
-        return
-    if user['bank_account']:
-        await query.edit_message_text(
-            f"🏦 **شماره حساب شما:** {user['bank_account']}\n\n"
-            f"برای تغییر، درخواست جدید ثبت کنید.",
-            reply_markup=main_menu_keyboard(user_id),
-            parse_mode='Markdown'
-        )
-        return
-    await query.edit_message_text(
-        "🏦 **ثبت شماره حساب بانکی**\n\n"
-        "لطفاً شماره حساب ۶ رقمی خود را وارد کنید:\n"
-        "(برای لغو /cancel بزنید)",
-        parse_mode='Markdown'
-    )
-    return BANK_ACCOUNT_STATE
-
-async def bank_account_receive(update: Update, context):
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        return ConversationHandler.END
-    if len(text) != 6 or not text.isdigit():
-        await update.message.reply_text("❌ شماره حساب باید ۶ رقم باشد. دوباره وارد کنید:")
-        return BANK_ACCOUNT_STATE
-    context.user_data['bank_account'] = text
-    await update.message.reply_text(
-        "🔐 **رمز بانکی خود را وارد کنید:**\n"
-        "(برای لغو /cancel بزنید)",
-        parse_mode='Markdown'
-    )
-    return BANK_PASSWORD_STATE
-
-async def bank_password_receive(update: Update, context):
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        return ConversationHandler.END
-    if len(text) != 4 or not text.isdigit():
-        await update.message.reply_text("❌ رمز باید ۴ رقم باشد. دوباره وارد کنید:")
-        return BANK_PASSWORD_STATE
-    
-    user = get_user_by_telegram_id(user_id)
-    if not user:
-        await update.message.reply_text("❌ شما ثبت‌نام نکرده‌اید.")
-        return ConversationHandler.END
-    
-    bank_account = context.user_data.get('bank_account')
-    if not bank_account:
-        await update.message.reply_text("❌ خطا: شماره حساب یافت نشد.")
-        return ConversationHandler.END
-    
-    req_id = add_bank_request(user['id'], user['national_id'], bank_account, text)
-    add_system_log('bank_request', f'درخواست شماره حساب از {user["camelot_name"]}', f'شماره حساب: {bank_account}', actor_id=user_id)
-    add_notification(user_id, 'درخواست شماره حساب', f'درخواست شما با شماره پیگیری {req_id} ثبت شد. منتظر تایید کارمند بانک باشید.')
-    
-    await update.message.reply_text(
-        f"✅ **درخواست شما ثبت شد.**\n\n"
-        f"شماره پیگیری: `{req_id}`\n"
-        f"پس از تایید کارمند بانک، شماره حساب شما فعال می‌شود.",
-        reply_markup=main_menu_keyboard(user_id),
-        parse_mode='Markdown'
-    )
-    context.user_data.pop('bank_account', None)
-    return ConversationHandler.END
-
 async def back_to_menu(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -723,52 +580,23 @@ async def panel_callback(update: Update, context):
         await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
         return
     
-    role = user['role']
-    
-    if role == 'مالک':
-        keyboard = [
-            [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
-            [InlineKeyboardButton("🏦 صندوق مدیریت بانکی", callback_data="admin_bank_requests")],
-            [InlineKeyboardButton("💼 ثبت شغل برای کاربر", callback_data="admin_job")],
-            [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
-            [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
-            [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
-            [InlineKeyboardButton("🔴 خاموش/روشن کردن ربات", callback_data="admin_toggle_bot")],
-            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
-        ]
-        await query.edit_message_text(
-            f"👑 **پنل مدیریت (مالک)**\n🕐 {get_jalali_date()}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
+    if user['role'] != 'مالک':
+        await query.edit_message_text("⛔ دسترسی ندارید.", reply_markup=main_menu_keyboard(user_id))
         return
     
-    elif role == 'کارمند بانک':
-        keyboard = [
-            [InlineKeyboardButton("🏦 صندوق مدیریت بانکی", callback_data="admin_bank_requests")],
-            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
-        ]
-        await query.edit_message_text(
-            f"🏦 **پنل مدیریت بانکی**\n🕐 {get_jalali_date()}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-        return
-    
-    elif role == 'کارمند اداره کار':
-        keyboard = [
-            [InlineKeyboardButton("💼 ثبت شغل برای کاربر", callback_data="admin_job")],
-            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
-        ]
-        await query.edit_message_text(
-            f"💼 **پنل مدیریت اداره کار**\n🕐 {get_jalali_date()}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-        return
-    
-    else:
-        await query.edit_message_text("⛔ شما دسترسی به پنل مدیریت ندارید.", reply_markup=main_menu_keyboard(user_id))
+    keyboard = [
+        [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
+        [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
+        [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
+        [InlineKeyboardButton("🔴 خاموش/روشن کردن ربات", callback_data="admin_toggle_bot")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")],
+    ]
+    await query.edit_message_text(
+        f"👑 **پنل مدیریت (مالک)**\n🕐 {get_jalali_date()}",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
 
 # ==================== خاموش/روشن کردن ربات ====================
 async def admin_toggle_bot(update: Update, context):
@@ -788,188 +616,6 @@ async def admin_toggle_bot(update: Update, context):
         reply_markup=main_menu_keyboard(user_id),
         parse_mode='Markdown'
     )
-
-# ==================== صندوق مدیریت بانکی ====================
-async def admin_bank_requests(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    user = get_user_by_telegram_id(user_id)
-    if not user or user['role'] not in ['کارمند بانک', 'مالک']:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    reqs = get_bank_requests('pending')
-    if not reqs:
-        await query.edit_message_text(
-            "📭 **هیچ درخواست بانکی در انتظار تایید نیست.**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]])
-        )
-        return
-    
-    text = "🏦 **لیست درخواست‌های شماره حساب (در انتظار تایید)**\n━━━━━━━━━━━━━━━━━━━\n\n"
-    for req in reqs:
-        req_user = get_user_by_telegram_id(req['user_id'])
-        if req_user:
-            text += f"🆔 #{req['id']}\n"
-            text += f"👤 {req_user['camelot_name']} (کدملی: {req['national_id']})\n"
-            text += f"🏦 شماره حساب: {req['bank_account']}\n"
-            text += f"🔐 رمز: {req['password']}\n"
-            text += f"🕐 {jdatetime.datetime.fromgregorian(datetime=datetime.strptime(req['created_at'], '%Y-%m-%d %H:%M:%S')).strftime('%Y/%m/%d - %H:%M')}\n"
-            text += f"━━━━━━━━━━━━━━━━━━━\n"
-    
-    keyboard = []
-    for req in reqs:
-        keyboard.append([
-            InlineKeyboardButton(f"✅ تایید #{req['id']}", callback_data=f"bank_approve_{req['id']}"),
-            InlineKeyboardButton(f"❌ رد #{req['id']}", callback_data=f"bank_reject_{req['id']}")
-        ])
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel")])
-    
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
-async def admin_bank_approve(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    user = get_user_by_telegram_id(user_id)
-    if not user or user['role'] not in ['کارمند بانک', 'مالک']:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    req_id = int(query.data.split('_')[2])
-    reqs = get_bank_requests('pending')
-    req = next((r for r in reqs if r['id'] == req_id), None)
-    if not req:
-        await query.edit_message_text("❌ این درخواست قبلاً پردازش شده است.")
-        return
-    
-    update_user_field(req['user_id'], 'bank_account', req['bank_account'])
-    update_bank_request(req_id, 'approved')
-    add_system_log('bank_request', f'تایید شماره حساب برای کاربر {req["user_id"]}', f'شماره حساب: {req["bank_account"]}', actor_id=user_id, target_id=req['user_id'])
-    add_notification(req['user_id'], 'تایید شماره حساب', f'شماره حساب {req["bank_account"]} شما با موفقیت تایید شد.')
-    await query.edit_message_text(f"✅ درخواست #{req_id} تایید شد.")
-
-async def admin_bank_reject(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    user = get_user_by_telegram_id(user_id)
-    if not user or user['role'] not in ['کارمند بانک', 'مالک']:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    req_id = int(query.data.split('_')[2])
-    reqs = get_bank_requests('pending')
-    req = next((r for r in reqs if r['id'] == req_id), None)
-    if not req:
-        await query.edit_message_text("❌ این درخواست قبلاً پردازش شده است.")
-        return
-    
-    await query.edit_message_text(
-        f"❌ **دلیل رد درخواست #{req_id} را وارد کنید:**\n"
-        f"(برای لغو /cancel بزنید)",
-        parse_mode='Markdown'
-    )
-    context.user_data['reject_req_id'] = req_id
-    return BANK_PASSWORD_STATE
-
-async def bank_reject_reason(update: Update, context):
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        return ConversationHandler.END
-    
-    req_id = context.user_data.get('reject_req_id')
-    if not req_id:
-        await update.message.reply_text("❌ خطا: شناسه درخواست یافت نشد.")
-        return ConversationHandler.END
-    
-    reqs = get_bank_requests('pending')
-    req = next((r for r in reqs if r['id'] == req_id), None)
-    if not req:
-        await update.message.reply_text("❌ این درخواست قبلاً پردازش شده است.")
-        return ConversationHandler.END
-    
-    update_bank_request(req_id, 'rejected', text)
-    add_system_log('bank_request', f'رد شماره حساب برای کاربر {req["user_id"]}', f'دلیل: {text}', actor_id=user_id, target_id=req['user_id'])
-    add_notification(req['user_id'], 'رد شماره حساب', f'درخواست شما رد شد.\nدلیل: {text}')
-    await update.message.reply_text(
-        f"❌ درخواست #{req_id} رد شد.\nدلیل: {text}",
-        reply_markup=main_menu_keyboard(user_id)
-    )
-    context.user_data.pop('reject_req_id', None)
-    return ConversationHandler.END
-
-# ==================== ثبت شغل توسط کارمند اداره کار ====================
-async def admin_job_start(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    user = get_user_by_telegram_id(user_id)
-    if not user or user['role'] not in ['کارمند اداره کار', 'مالک']:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    await query.edit_message_text(
-        "💼 **ثبت شغل برای کاربر**\n\n"
-        "لطفاً کد ملی کاربر را وارد کنید:\n"
-        "(برای لغو /cancel بزنید)",
-        parse_mode='Markdown'
-    )
-    return JOB_REQUEST_STATE
-
-async def admin_job_receive(update: Update, context):
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        return ConversationHandler.END
-    if len(text) != 6 or not text.isdigit():
-        await update.message.reply_text("❌ کد ملی باید ۶ رقم باشد. دوباره وارد کنید:")
-        return JOB_REQUEST_STATE
-    
-    target_user = get_user_by_national_id(text)
-    if not target_user:
-        await update.message.reply_text("❌ کاربری با این کد ملی یافت نشد. دوباره وارد کنید:")
-        return JOB_REQUEST_STATE
-    
-    context.user_data['job_target_national'] = text
-    await update.message.reply_text(
-        f"👤 **کاربر:** {target_user['real_name']} ({target_user['camelot_name']})\n"
-        f"🆔 کد ملی: {target_user['national_id']}\n\n"
-        f"لطفاً شغل جدید را وارد کنید:\n"
-        f"(برای لغو /cancel بزنید)",
-        parse_mode='Markdown'
-    )
-    return JOB_REQUEST_STATE + 1
-
-async def admin_job_set(update: Update, context):
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        return ConversationHandler.END
-    
-    national_id = context.user_data.get('job_target_national')
-    if not national_id:
-        await update.message.reply_text("❌ خطا: کد ملی یافت نشد.")
-        return ConversationHandler.END
-    
-    target_user = get_user_by_national_id(national_id)
-    if not target_user:
-        await update.message.reply_text("❌ کاربر یافت نشد.")
-        return ConversationHandler.END
-    
-    update_user_field(target_user['telegram_id'], 'job', text)
-    add_system_log('admin_action', f'ثبت شغل برای {target_user["camelot_name"]}', f'شغل: {text}', actor_id=user_id, target_id=target_user['telegram_id'])
-    add_notification(target_user['telegram_id'], 'ثبت شغل', f'شغل شما توسط اداره کار ثبت شد.\nشغل: {text}')
-    await update.message.reply_text(
-        f"✅ شغل برای {target_user['camelot_name']} با موفقیت ثبت شد.\nشغل: {text}",
-        reply_markup=main_menu_keyboard(user_id)
-    )
-    context.user_data.pop('job_target_national', None)
-    return ConversationHandler.END
 
 # ==================== مدیریت کاربران (فقط مالک) ====================
 USERS_PER_PAGE = 10
@@ -1009,8 +655,6 @@ async def admin_users_list(update: Update, context, page=0):
         text += f"🆔 کدملی: {u['national_id']}\n"
         text += f"🎂 سن: {u['age'] if u['age'] else 'ثبت نشده'}\n"
         text += f"👑 نقش: {get_role_display(u['role'])}\n"
-        text += f"💼 شغل: {u['job'] if u['job'] else '-'}\n"
-        text += f"🏦 شماره حساب: {u['bank_account'] if u['bank_account'] else '-'}\n"
         text += f"📱 آیدی: {u['telegram_id']}\n"
         text += f"📱 یوزرنیم: @{u['telegram_username'] or 'ندارد'}\n"
         text += f"📅 ثبت: {u['register_date_shamsi']} - {u['register_time']}\n"
@@ -1079,8 +723,6 @@ async def admin_manage_user_receive(update: Update, context):
 🗡️ **نام کملوتی:** {target_user['camelot_name']}
 🆔 **کد ملی:** {target_user['national_id']}
 👑 **نقش:** {get_role_display(target_user['role'])}
-💼 **شغل:** {target_user['job'] if target_user['job'] else '-'}
-🏦 **شماره حساب:** {target_user['bank_account'] if target_user['bank_account'] else '-'}
 📱 **آیدی تلگرام:** {target_user['telegram_id']}
 📱 **یوزرنیم:** @{target_user['telegram_username'] or 'ندارد'}
 📅 **تاریخ ثبت:** {target_user['register_date_shamsi']} - {target_user['register_time']}
@@ -1225,7 +867,7 @@ async def admin_change_role(update: Update, context, target_telegram_id):
         await query.edit_message_text("❌ کاربر یافت نشد.")
         return
     
-    roles = ['شهروند', 'کارمند', 'کارمند بانک', 'کارمند اداره کار', 'شاه']
+    roles = ['شهروند', 'کارمند', 'شاه']
     keyboard = []
     for role in roles:
         if role != target_user['role']:
@@ -1331,7 +973,7 @@ async def admin_report_start(update: Update, context, target_telegram_id):
     await query.answer()
     user_id = update.effective_user.id
     actor = get_user_by_telegram_id(user_id)
-    if not actor or actor['role'] not in ['کارمند', 'کارمند بانک', 'کارمند اداره کار', 'شاه', 'مالک']:
+    if not actor or actor['role'] not in ['کارمند', 'شاه', 'مالک']:
         await query.edit_message_text("⛔ فقط کارمندان و بالاتر می‌توانند گزارش دهند.")
         return
     context.user_data['report_target'] = target_telegram_id
@@ -1616,17 +1258,6 @@ def main():
     )
     app.add_handler(restore_conv)
     
-    # شماره حساب بانکی
-    bank_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(bank_account_callback, pattern='^bank_account$')],
-        states={
-            BANK_ACCOUNT_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bank_account_receive)],
-            BANK_PASSWORD_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bank_password_receive)],
-        },
-        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-    )
-    app.add_handler(bank_conv)
-    
     # مدیریت کاربر با آیدی (مالک)
     manage_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_manage_user_start, pattern='^admin_manage_user$')],
@@ -1662,30 +1293,6 @@ def main():
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(report_conv)
-    
-    # ثبت شغل توسط کارمند اداره کار
-    job_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_job_start, pattern='^admin_job$')],
-        states={
-            JOB_REQUEST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_job_receive)],
-            JOB_REQUEST_STATE + 1: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_job_set)],
-        },
-        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-    )
-    app.add_handler(job_conv)
-    
-    # تایید/رد درخواست بانکی
-    app.add_handler(CallbackQueryHandler(admin_bank_requests, pattern='^admin_bank_requests$'))
-    app.add_handler(CallbackQueryHandler(admin_bank_approve, pattern='^bank_approve_'))
-    app.add_handler(CallbackQueryHandler(admin_bank_reject, pattern='^bank_reject_'))
-    reject_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_bank_reject, pattern='^bank_reject_')],
-        states={
-            BANK_PASSWORD_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bank_reject_reason)],
-        },
-        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-    )
-    app.add_handler(reject_conv)
     
     # ارسال پیام همگانی
     broadcast_conv = ConversationHandler(
