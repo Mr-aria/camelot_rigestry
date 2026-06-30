@@ -78,6 +78,15 @@ def init_db():
         )
     ''')
     
+    # جدول بلک‌لیست
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS blacklist (
+            telegram_id INTEGER PRIMARY KEY,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT
+        )
+    ''')
+    
     defaults = [
         ('rules_text', 'قوانین سرزمین کملوت:\n1. احترام به یکدیگر\n2. همکاری با شوالیه‌ها\n3. جادو فقط در محدوده مجاز'),
         ('welcome_text', 'سلام، ای مهمان گرانقدر! 🏰✨\nبه سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟'),
@@ -175,11 +184,45 @@ def update_user_field(telegram_id, field, value):
     conn.close()
 
 def exile_citizen(telegram_id):
+    """اخراج کامل کاربر: حذف کد ملی، تغییر نقش، و افزودن به بلک‌لیست"""
     conn = get_db_connection()
     cursor = conn.cursor()
+    # غیرفعال کردن کاربر در دیتابیس شهروندان
     cursor.execute("UPDATE citizens SET national_id = NULL, role = 'شهروند' WHERE telegram_id = ?", (telegram_id,))
+    # افزودن به بلک‌لیست
+    cursor.execute("INSERT OR IGNORE INTO blacklist (telegram_id, reason) VALUES (?, ?)", (telegram_id, 'اخراج شده توسط مدیریت'))
     conn.commit()
     conn.close()
+
+def is_blacklisted(telegram_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM blacklist WHERE telegram_id = ?", (telegram_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
+def add_to_blacklist(telegram_id, reason='افزوده شده توسط مدیریت'):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO blacklist (telegram_id, reason) VALUES (?, ?)", (telegram_id, reason))
+    conn.commit()
+    conn.close()
+
+def remove_from_blacklist(telegram_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM blacklist WHERE telegram_id = ?", (telegram_id,))
+    conn.commit()
+    conn.close()
+
+def get_blacklist():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT telegram_id, reason, added_at FROM blacklist ORDER BY added_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
 def add_system_log(log_type, title, content, actor_id=None, target_id=None):
     conn = get_db_connection()
@@ -246,7 +289,7 @@ def export_full_backup():
         'created_at': dt.now(TEHRAN_TZ).isoformat(),
         'tables': {}
     }
-    for table in ['citizens', 'system_logs', 'config', 'notifications']:
+    for table in ['citizens', 'system_logs', 'config', 'notifications', 'blacklist']:
         cursor.execute(f"SELECT * FROM {table}")
         rows = cursor.fetchall()
         table_data = []
@@ -270,7 +313,7 @@ def import_full_backup(json_data):
     
     conn = get_db_connection()
     cursor = conn.cursor()
-    for table in ['citizens', 'system_logs', 'config', 'notifications']:
+    for table in ['citizens', 'system_logs', 'config', 'notifications', 'blacklist']:
         cursor.execute(f"DELETE FROM {table}")
     for table, rows in backup_data['tables'].items():
         if rows:
@@ -324,9 +367,21 @@ RESTORE_BACKUP_STATE = 800
 REPORT_REASON = 700
 EDIT_RULES_STATE = 900
 EDIT_WELCOME_STATE = 950
+BLACKLIST_ADD_STATE = 1000
+BLACKLIST_REMOVE_STATE = 1001
 
 async def start(update: Update, context):
     user_id = update.effective_user.id
+    
+    # بررسی بلک‌لیست
+    if is_blacklisted(user_id):
+        await update.message.reply_text(
+            "🚫 **شما در لیست سیاه کملوت قرار دارید و اجازه ثبت‌نام ندارید.**\n"
+            "در صورت اعتراض، با مدیریت تماس بگیرید.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
     existing_user = get_user_by_telegram_id(user_id)
     
     if existing_user:
@@ -572,9 +627,9 @@ async def back_to_menu(update: Update, context):
     user_id = update.effective_user.id
     await query.edit_message_text("🏰 منوی اصلی کملوت", reply_markup=main_menu_keyboard(user_id))
 
-# ==================== تابع show_panel (اصلاح‌شده) ====================
+# ==================== تابع show_panel ====================
 async def show_panel(query, user_id):
-    """نمایش پنل مدیریت - بدون دوباره answer کردن"""
+    """نمایش پنل مدیریت"""
     user = get_user_by_telegram_id(user_id)
     if not user:
         await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
@@ -586,6 +641,7 @@ async def show_panel(query, user_id):
             [InlineKeyboardButton("📜 تغییر قوانین", callback_data="admin_edit_rules")],
             [InlineKeyboardButton("💬 تغییر پیام خوش‌آمد", callback_data="admin_edit_welcome")],
             [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
+            [InlineKeyboardButton("🚫 مدیریت بلک‌لیست", callback_data="admin_blacklist")],
             [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
             [InlineKeyboardButton("💾 پشتیبان‌گیری و بازیابی", callback_data="admin_backup")],
             [InlineKeyboardButton("🔴 خاموش/روشن کردن ربات", callback_data="admin_toggle_bot")],
@@ -606,7 +662,7 @@ async def show_panel(query, user_id):
         parse_mode='HTML'
     )
 
-# ==================== پنل مدیریت (اصلاح‌شده) ====================
+# ==================== پنل مدیریت ====================
 async def panel_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -620,7 +676,7 @@ async def panel_callback(update: Update, context):
         return
     await show_panel(query, user_id)
 
-# ==================== back_to_panel اصلاح‌شده ====================
+# ==================== back_to_panel ====================
 async def back_to_panel(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -724,7 +780,7 @@ ADMIN_BACKUP_STATE = 500
 ADMIN_USER_MANAGE_STATE = 600
 
 async def admin_users_list(update: Update, context):
-    """نمایش لیست کاربران - با دسترسی محدود برای کارمند"""
+    """نمایش لیست کاربران - با آیدی تلگرام"""
     query = update.callback_query
     await query.answer()
     
@@ -754,13 +810,15 @@ async def admin_users_list(update: Update, context):
             nid = escape(str(u['national_id'] or 'ندارد'))
             age = escape(str(u['age'] or 'ثبت نشده'))
             gender = escape(str(u['gender'] or 'ثبت نشده'))
+            telegram_id = u['telegram_id']
             
             if is_employee_or_shah:
-                # کارمند/شاه: فقط اطلاعات محدود
+                # کارمند/شاه: اطلاعات محدود + آیدی تلگرام
                 text += f"{idx}. {name} ({camelot})\n"
                 text += f"   🆔 {nid} | 🎂 {age} | ⚧ {gender}\n"
+                text += f"   📱 آیدی: {telegram_id}\n"
             else:
-                # مالک: همه اطلاعات
+                # مالک: همه اطلاعات + آیدی تلگرام
                 role_display = escape(str(get_role_display(u['role'])))
                 uname = escape(str(u['telegram_username'] or 'ندارد'))
                 date_reg = escape(str(u['register_date_shamsi'] or 'ندارد'))
@@ -768,6 +826,7 @@ async def admin_users_list(update: Update, context):
                 text += f"{idx}. {name} (@{uname})\n"
                 text += f"   🆔 {nid} | 🎂 {age} | ⚧ {gender}\n"
                 text += f"   👑 {role_display} | 📅 {date_reg} - {time_reg}\n"
+                text += f"   📱 آیدی: {telegram_id}\n"
         
         if len(all_users) > 20:
             text += f"\n... و {len(all_users) - 20} کاربر دیگر"
@@ -846,11 +905,11 @@ async def admin_manage_user_receive(update: Update, context):
 🆔 کدملی: {target_user['national_id']}
 🎂 سن: {target_user['age'] or 'ثبت نشده'}
 ⚧️ جنسیت: {target_user['gender']}
+📱 آیدی تلگرام: {target_user['telegram_id']}
 """
     if not is_employee_or_shah:
         # مالک اطلاعات کامل می‌بینه
         info += f"👑 نقش: {get_role_display(target_user['role'])}\n"
-        info += f"📱 آیدی: {target_user['telegram_id']}\n"
         info += f"📱 یوزرنیم: @{target_user['telegram_username'] or 'ندارد'}\n"
         info += f"📅 ثبت: {target_user['register_date_shamsi']} - {target_user['register_time']}\n"
     info += "━━━━━━━━━━━━━━━━━━━"
@@ -1070,7 +1129,8 @@ async def admin_exile_user(update: Update, context, target_telegram_id):
         f"⚠️ **تأیید اخراج شهروند**\n\n"
         f"کاربر: {user['camelot_name']} (نام واقعی: {user['real_name']})\n"
         f"کد ملی فعلی: {user['national_id']}\n\n"
-        f"آیا از اخراج این شهروند مطمئن هستید؟",
+        f"آیا از اخراج این شهروند مطمئن هستید؟\n"
+        f"(پس از اخراج، کاربر به بلک‌لیست اضافه می‌شود و نمی‌تواند ثبت‌نام کند)",
         reply_markup=keyboard,
         parse_mode='Markdown'
     )
@@ -1083,21 +1143,24 @@ async def admin_exile_confirm(update: Update, context):
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     try:
-        target = int(query.data.split('_')[3])  # admin_exile_confirm_{target}
+        target = int(query.data.split('_')[3])
         user = get_user_by_telegram_id(target)
         if not user:
             await query.edit_message_text("❌ کاربر یافت نشد.")
             return
         
+        # اخراج کامل با افزودن به بلک‌لیست
         exile_citizen(target)
         add_system_log('admin_action', f'اخراج {user["camelot_name"]}', f'کد ملی قبلی: {user["national_id"]}', actor_id=user_id, target_id=target)
-        add_notification(target, 'اخراج از کملوت', f'شما از سرزمین کملوت اخراج شدید. کد ملی شما آزاد شد.')
+        add_notification(target, 'اخراج از کملوت', f'شما از سرزمین کملوت اخراج شدید. کد ملی شما آزاد شد و به لیست سیاه اضافه شدید.')
         try:
-            await context.bot.send_message(target, f"🚫 **شما از سرزمین کملوت اخراج شدید.**\nکد ملی شما آزاد شد.", parse_mode='Markdown')
+            await context.bot.send_message(target, f"🚫 **شما از سرزمین کملوت اخراج شدید.**\nکد ملی شما آزاد شد و به لیست سیاه اضافه شدید.", parse_mode='Markdown')
         except:
             pass
         await query.edit_message_text(
-            f"✅ {user['camelot_name']} اخراج شد. کد ملی آزاد شد.",
+            f"✅ {user['camelot_name']} با موفقیت اخراج شد.\n"
+            f"• کد ملی آزاد شد.\n"
+            f"• کاربر به بلک‌لیست اضافه شد.",
             reply_markup=main_menu_keyboard(user_id),
             parse_mode='Markdown'
         )
@@ -1112,6 +1175,139 @@ async def admin_cancel_exile(update: Update, context):
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("❌ لغو شد.", reply_markup=main_menu_keyboard(update.effective_user.id))
+
+# ==================== مدیریت بلک‌لیست (فقط مالک) ====================
+async def admin_blacklist_menu(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    
+    blacklist = get_blacklist()
+    if not blacklist:
+        text = "🚫 **لیست سیاه خالی است.**"
+    else:
+        text = "🚫 **لیست سیاه کملوت**\n━━━━━━━━━━━━━━━━━━━\n\n"
+        for item in blacklist:
+            tg_id = item['telegram_id']
+            reason = escape(str(item['reason'] or 'ندارد'))
+            added = item['added_at']
+            # تبدیل تاریخ
+            added_dt = datetime.strptime(added, '%Y-%m-%d %H:%M:%S')
+            jadded = jdatetime.datetime.fromgregorian(datetime=added_dt)
+            date_str = jadded.strftime('%Y/%m/%d - %H:%M')
+            text += f"🆔 {tg_id}\n"
+            text += f"   📝 دلیل: {reason}\n"
+            text += f"   🕐 {date_str}\n━━━━━━━━━━━━━━━━━━━\n"
+    
+    keyboard = [
+        [InlineKeyboardButton("➕ افزودن به بلک‌لیست", callback_data="admin_blacklist_add")],
+        [InlineKeyboardButton("➖ حذف از بلک‌لیست", callback_data="admin_blacklist_remove")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")],
+    ]
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+async def admin_blacklist_add_start(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    await query.edit_message_text(
+        "➕ **افزودن به بلک‌لیست**\n\n"
+        "لطفاً **آیدی عددی تلگرام** کاربر را وارد کنید:\n"
+        "(برای لغو /cancel بزنید)",
+        parse_mode='Markdown'
+    )
+    return BLACKLIST_ADD_STATE
+
+async def admin_blacklist_add_receive(update: Update, context):
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ دسترسی ندارید.")
+        return ConversationHandler.END
+    
+    if text.lower() == '/cancel':
+        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
+        return ConversationHandler.END
+    
+    if not text.isdigit():
+        await update.message.reply_text("❌ لطفاً یک عدد وارد کنید.")
+        return BLACKLIST_ADD_STATE
+    
+    target = int(text)
+    if is_blacklisted(target):
+        await update.message.reply_text("❌ این کاربر قبلاً در بلک‌لیست است.")
+        return ConversationHandler.END
+    
+    # بررسی اینکه آیا کاربر در دیتابیس وجود دارد یا خیر (اختیاری)
+    user = get_user_by_telegram_id(target)
+    if user:
+        reason = f'افزوده شده توسط مالک (کاربر: {user["camelot_name"]})'
+    else:
+        reason = 'افزوده شده توسط مالک (کاربر ناشناس)'
+    
+    add_to_blacklist(target, reason)
+    add_system_log('admin_action', f'افزودن به بلک‌لیست', f'کاربر {target} اضافه شد', actor_id=user_id)
+    await update.message.reply_text(
+        f"✅ کاربر با آیدی `{target}` به بلک‌لیست اضافه شد.",
+        reply_markup=main_menu_keyboard(user_id),
+        parse_mode='Markdown'
+    )
+    return ConversationHandler.END
+
+async def admin_blacklist_remove_start(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    await query.edit_message_text(
+        "➖ **حذف از بلک‌لیست**\n\n"
+        "لطفاً **آیدی عددی تلگرام** کاربر را وارد کنید:\n"
+        "(برای لغو /cancel بزنید)",
+        parse_mode='Markdown'
+    )
+    return BLACKLIST_REMOVE_STATE
+
+async def admin_blacklist_remove_receive(update: Update, context):
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ دسترسی ندارید.")
+        return ConversationHandler.END
+    
+    if text.lower() == '/cancel':
+        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
+        return ConversationHandler.END
+    
+    if not text.isdigit():
+        await update.message.reply_text("❌ لطفاً یک عدد وارد کنید.")
+        return BLACKLIST_REMOVE_STATE
+    
+    target = int(text)
+    if not is_blacklisted(target):
+        await update.message.reply_text("❌ این کاربر در بلک‌لیست نیست.")
+        return ConversationHandler.END
+    
+    remove_from_blacklist(target)
+    add_system_log('admin_action', f'حذف از بلک‌لیست', f'کاربر {target} حذف شد', actor_id=user_id)
+    await update.message.reply_text(
+        f"✅ کاربر با آیدی `{target}` از بلک‌لیست حذف شد.\n"
+        f"اکنون می‌تواند ثبت‌نام کند.",
+        reply_markup=main_menu_keyboard(user_id),
+        parse_mode='Markdown'
+    )
+    return ConversationHandler.END
 
 # ==================== گزارش کارمند به مالک ====================
 async def admin_report_start(update: Update, context, target_telegram_id):
@@ -1423,6 +1619,22 @@ def main():
     )
     app.add_handler(edit_welcome_conv)
     
+    # مدیریت بلک‌لیست - افزودن
+    blacklist_add_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_blacklist_add_start, pattern='^admin_blacklist_add$')],
+        states={BLACKLIST_ADD_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_blacklist_add_receive)]},
+        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+    )
+    app.add_handler(blacklist_add_conv)
+    
+    # مدیریت بلک‌لیست - حذف
+    blacklist_remove_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_blacklist_remove_start, pattern='^admin_blacklist_remove$')],
+        states={BLACKLIST_REMOVE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_blacklist_remove_receive)]},
+        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+    )
+    app.add_handler(blacklist_remove_conv)
+    
     # مدیریت کاربر با آیدی (مالک و کارمند و شاه)
     manage_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_manage_user_start, pattern='^admin_manage_user$')],
@@ -1476,6 +1688,9 @@ def main():
     app.add_handler(CallbackQueryHandler(back_to_panel, pattern='^back_to_panel$'))
     app.add_handler(CallbackQueryHandler(my_info_callback, pattern='^my_info$'))
     app.add_handler(CallbackQueryHandler(notifications_callback, pattern='^notifications$'))
+    
+    # مدیریت بلک‌لیست - منو
+    app.add_handler(CallbackQueryHandler(admin_blacklist_menu, pattern='^admin_blacklist$'))
     
     # لاگ‌ها و پشتیبان
     app.add_handler(CallbackQueryHandler(admin_logs_list, pattern='^admin_logs$'))
