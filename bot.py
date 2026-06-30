@@ -8,6 +8,7 @@ from datetime import datetime
 import pytz
 import jdatetime
 import asyncio
+from html import escape
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 
@@ -570,18 +571,14 @@ async def back_to_menu(update: Update, context):
     user_id = update.effective_user.id
     await query.edit_message_text("🏰 منوی اصلی کملوت", reply_markup=main_menu_keyboard(user_id))
 
-# ==================== پنل مدیریت (با دسترسی‌های کارمند) ====================
-async def panel_callback(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
+# ==================== تابع show_panel (جایگزین تکرار کد) ====================
+async def show_panel(query, user_id):
+    """نمایش پنل مدیریت - بدون دوباره answer کردن"""
     user = get_user_by_telegram_id(user_id)
     if not user:
         await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
         return
-    
     role = user['role']
-    
     if role == 'مالک':
         keyboard = [
             [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
@@ -602,12 +599,31 @@ async def panel_callback(update: Update, context):
     else:
         await query.edit_message_text("⛔ دسترسی ندارید.", reply_markup=main_menu_keyboard(user_id))
         return
-    
     await query.edit_message_text(
-        f"👑 **پنل مدیریت**\n👤 نقش: {get_role_display(role)}\n🕐 {get_jalali_date()}",
+        f"👑 <b>پنل مدیریت</b>\n👤 نقش: {get_role_display(role)}\n🕐 {get_jalali_date()}",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
+        parse_mode='HTML'
     )
+
+# ==================== پنل مدیریت (با دسترسی‌های کارمند) ====================
+async def panel_callback(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    user = get_user_by_telegram_id(user_id)
+    if not user:
+        await query.edit_message_text("❌ شما ثبت‌نام نکرده‌اید.")
+        return
+    if user['role'] not in ['مالک', 'کارمند']:
+        await query.edit_message_text("⛔ دسترسی ندارید.", reply_markup=main_menu_keyboard(user_id))
+        return
+    await show_panel(query, user_id)
+
+# ==================== back_to_panel اصلاح‌شده ====================
+async def back_to_panel(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    await show_panel(query, update.effective_user.id)
 
 # ==================== تغییر قوانین ====================
 async def admin_edit_rules_start(update: Update, context):
@@ -707,44 +723,63 @@ ADMIN_BACKUP_STATE = 500
 ADMIN_USER_MANAGE_STATE = 600
 
 async def admin_users_list(update: Update, context):
-    """نمایش لیست کاربران - ساده و تضمینی"""
+    """نمایش لیست کاربران - اصلاح‌شده با HTML و escape"""
     query = update.callback_query
     await query.answer()
     
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    user = get_user_by_telegram_id(user_id)
+    # کارمند هم باید بتونه ببینه (با پنل هماهنگه)
+    if not user or user['role'] not in ['مالک', 'کارمند']:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     
-    all_users = get_all_citizens()
-    if not all_users:
+    try:
+        all_users = get_all_citizens()
+        if not all_users:
+            await query.edit_message_text(
+                "📭 <b>هیچ کاربری ثبت‌نام نکرده.</b>",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]
+                ]),
+                parse_mode='HTML'
+            )
+            return
+        
+        # escape() همه کاراکترهای خطرناک HTML رو بی‌خطر می‌کنه
+        text = "👥 <b>لیست کاربران</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
+        for idx, u in enumerate(all_users[:20], 1):
+            name = escape(str(u['real_name'] or 'ندارد'))
+            uname = escape(str(u['telegram_username'] or 'ندارد'))
+            nid = escape(str(u['national_id'] or 'ندارد'))
+            role = escape(str(u['role'] or 'شهروند'))
+            text += f"{idx}. {name} (@{uname})\n"
+            text += f"   🆔 {nid} | {role}\n"
+        
+        if len(all_users) > 20:
+            text += f"\n... و {len(all_users) - 20} کاربر دیگر"
+        
+        keyboard = [
+            [InlineKeyboardButton("🔍 مدیریت کاربر", callback_data="admin_manage_user")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")],
+        ]
         await query.edit_message_text(
-            "📭 **هیچ کاربری ثبت‌نام نکرده.**",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]
-            ]),
-            parse_mode='Markdown'
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
         )
-        return
     
-    text = "👥 **لیست کاربران**\n━━━━━━━━━━━━━━━━━━━\n\n"
-    for idx, u in enumerate(all_users[:20], 1):
-        text += f"{idx}. {u['real_name']} (@{u['telegram_username'] or 'ندارد'})\n"
-        text += f"   🆔 {u['national_id']} | {u['role']}\n"
-    
-    if len(all_users) > 20:
-        text += f"\n... و {len(all_users) - 20} کاربر دیگر"
-    
-    keyboard = [
-        [InlineKeyboardButton("🔍 مدیریت کاربر", callback_data="admin_manage_user")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")],
-    ]
-    
-    await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
+    except Exception as e:
+        logger.error(f"admin_users_list error: {e}")
+        try:
+            await query.edit_message_text(
+                f"❌ خطا در بارگذاری لیست: {escape(str(e))}",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]
+                ])
+            )
+        except:
+            pass
 
 # ==================== مدیریت کاربر با آیدی ====================
 async def admin_manage_user_start(update: Update, context):
@@ -1311,12 +1346,13 @@ def main():
     )
     app.add_handler(backup_import_conv)
     
-    # ---------- کالبک‌های اصلی (مهم) ----------
+    # ---------- کالبک‌های اصلی ----------
     app.add_handler(CallbackQueryHandler(panel_callback, pattern='^panel$'))
-    app.add_handler(CallbackQueryHandler(admin_users_list, pattern='^admin_users$'))  # <--- این مهمه
-    app.add_handler(CallbackQueryHandler(admin_manage_user_start, pattern='^admin_manage_user$'))
+    app.add_handler(CallbackQueryHandler(admin_users_list, pattern='^admin_users$'))
+    # ← این خط حذف شد (تکراری بود، manage_conv قبلاً ثبتش کرده):
+    # app.add_handler(CallbackQueryHandler(admin_manage_user_start, pattern='^admin_manage_user$'))
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'))
-    app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_panel$'))
+    app.add_handler(CallbackQueryHandler(back_to_panel, pattern='^back_to_panel$'))  # ← این جدیده
     app.add_handler(CallbackQueryHandler(my_info_callback, pattern='^my_info$'))
     app.add_handler(CallbackQueryHandler(notifications_callback, pattern='^notifications$'))
     
