@@ -1082,22 +1082,31 @@ async def admin_exile_confirm(update: Update, context):
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    target = int(query.data.split('_')[3])  # admin_exile_confirm_{target}
-    user = get_user_by_telegram_id(target)
-    if not user:
-        await query.edit_message_text("❌ کاربر یافت نشد.")
-        return
-    exile_citizen(target)
-    add_system_log('admin_action', f'اخراج {user["camelot_name"]}', f'کد ملی قبلی: {user["national_id"]}', actor_id=user_id, target_id=target)
-    add_notification(target, 'اخراج از کملوت', f'شما از سرزمین کملوت اخراج شدید. کد ملی شما آزاد شد.')
     try:
-        await context.bot.send_message(target, f"🚫 **شما از سرزمین کملوت اخراج شدید.**\nکد ملی شما آزاد شد.", parse_mode='Markdown')
-    except: pass
-    await query.edit_message_text(
-        f"✅ {user['camelot_name']} اخراج شد. کد ملی آزاد شد.",
-        reply_markup=main_menu_keyboard(user_id),
-        parse_mode='Markdown'
-    )
+        target = int(query.data.split('_')[3])  # admin_exile_confirm_{target}
+        user = get_user_by_telegram_id(target)
+        if not user:
+            await query.edit_message_text("❌ کاربر یافت نشد.")
+            return
+        
+        exile_citizen(target)
+        add_system_log('admin_action', f'اخراج {user["camelot_name"]}', f'کد ملی قبلی: {user["national_id"]}', actor_id=user_id, target_id=target)
+        add_notification(target, 'اخراج از کملوت', f'شما از سرزمین کملوت اخراج شدید. کد ملی شما آزاد شد.')
+        try:
+            await context.bot.send_message(target, f"🚫 **شما از سرزمین کملوت اخراج شدید.**\nکد ملی شما آزاد شد.", parse_mode='Markdown')
+        except:
+            pass
+        await query.edit_message_text(
+            f"✅ {user['camelot_name']} اخراج شد. کد ملی آزاد شد.",
+            reply_markup=main_menu_keyboard(user_id),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in admin_exile_confirm: {e}")
+        await query.edit_message_text(
+            f"❌ خطا در اخراج کاربر: {escape(str(e))}",
+            reply_markup=main_menu_keyboard(user_id)
+        )
 
 async def admin_cancel_exile(update: Update, context):
     query = update.callback_query
@@ -1163,6 +1172,9 @@ async def admin_report_reason(update: Update, context):
 """
     try:
         await context.bot.send_message(OWNER_ID, report_text, parse_mode='Markdown')
+        # ذخیره گزارش در صندوق پیام مالک
+        add_notification(OWNER_ID, 'گزارش جدید', report_text)
+        
         await update.message.reply_text(
             f"✅ گزارش شما با موفقیت به مدیریت ارسال شد.\nکاربر: {target_user['camelot_name']}",
             reply_markup=main_menu_keyboard(user_id)
