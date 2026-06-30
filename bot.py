@@ -476,7 +476,8 @@ async def restore_backup_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     await query.edit_message_text(
@@ -489,7 +490,8 @@ async def restore_backup_callback(update: Update, context):
 
 async def restore_backup_file(update: Update, context):
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     doc = update.message.document
@@ -605,7 +607,8 @@ async def admin_edit_rules_start(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     current = get_config('rules_text') or "قوانین کملوت"
@@ -620,7 +623,8 @@ async def admin_edit_rules_start(update: Update, context):
 async def admin_edit_rules_receive(update: Update, context):
     text = update.message.text
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     if text.lower() == '/cancel':
@@ -640,7 +644,8 @@ async def admin_edit_welcome_start(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     current = get_config('welcome_text') or "پیام خوش‌آمد پیش‌فرض"
@@ -655,7 +660,8 @@ async def admin_edit_welcome_start(update: Update, context):
 async def admin_edit_welcome_receive(update: Update, context):
     text = update.message.text
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     if text.lower() == '/cancel':
@@ -675,7 +681,8 @@ async def admin_toggle_bot(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     current = get_config('bot_status')
@@ -701,9 +708,12 @@ async def admin_users_list(update: Update, context, page=0):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
+        logger.info(f"admin_users_list: دسترسی غیرمجاز توسط user_id={user_id}, نقش={actor['role'] if actor else 'None'}")
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
+    logger.info(f"admin_users_list called by user_id={user_id} with role={actor['role']}")
     
     all_users = get_all_citizens()
     total = len(all_users)
@@ -756,7 +766,8 @@ async def admin_manage_user_start(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     await query.edit_message_text(
@@ -770,7 +781,8 @@ async def admin_manage_user_start(update: Update, context):
 async def admin_manage_user_receive(update: Update, context):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     if text.lower() == '/cancel':
@@ -820,7 +832,8 @@ async def admin_edit_field_start(update: Update, context, field_name, target_tel
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     context.user_data['edit_field'] = field_name
@@ -843,7 +856,8 @@ async def admin_edit_field_start(update: Update, context, field_name, target_tel
 async def admin_edit_value(update: Update, context):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     if text.lower() == '/cancel':
@@ -931,7 +945,8 @@ async def admin_change_role(update: Update, context, target_telegram_id):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     
@@ -959,7 +974,8 @@ async def admin_set_role(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     
@@ -989,7 +1005,8 @@ async def admin_exile_user(update: Update, context, target_telegram_id):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     
@@ -1015,7 +1032,8 @@ async def admin_exile_confirm(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     target = int(query.data.split('_')[3])
@@ -1038,6 +1056,7 @@ async def admin_exile_confirm(update: Update, context):
 async def admin_cancel_exile(update: Update, context):
     query = update.callback_query
     await query.answer()
+    # این تابع فقط از دکمه‌های تأیید اخراج صدا زده می‌شود که قبلاً کنترل دسترسی شده است.
     await query.edit_message_text("❌ لغو شد.", reply_markup=main_menu_keyboard(update.effective_user.id))
 
 # ==================== گزارش کارمند به مالک (هم برای مالک و هم کارمند) ====================
@@ -1170,7 +1189,8 @@ async def admin_logs_list(update: Update, context, page=0):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     
@@ -1215,7 +1235,8 @@ async def admin_backup_menu(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     keyboard = [
@@ -1236,7 +1257,8 @@ async def admin_backup_export(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     await query.edit_message_text("📥 در حال تهیه پشتیبان...", parse_mode='Markdown')
@@ -1261,7 +1283,8 @@ async def admin_backup_import_start(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
     await query.edit_message_text(
@@ -1274,7 +1297,8 @@ async def admin_backup_import_start(update: Update, context):
 
 async def admin_backup_import_file(update: Update, context):
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    actor = get_user_by_telegram_id(user_id)
+    if not actor or actor['role'] != 'مالک':
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
     document = update.message.document
